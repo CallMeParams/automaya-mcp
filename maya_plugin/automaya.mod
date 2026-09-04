@@ -1,0 +1,4 @@
++ MAYAVERSION:2024 automaya 1.0.0 AUTOMAYA_ROOT
+PYTHONPATH +:= .
+PYTHONPATH +:= scripts
+MAYA_SCRIPT_PATH +:= scripts

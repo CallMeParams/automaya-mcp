@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "automaya-mcp"
+version = "1.0.0"
+description = "MCP server and in-DCC console for controlling Autodesk Maya 2024: modeling, rigging, previs, FX, Arnold, asset libraries, AI 3D generation and a real time change stream for Unreal."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Adam Waters" }]
+keywords = ["maya", "mcp", "autodesk", "claude", "3d", "previs", "unreal"]
+dependencies = [
+  "mcp>=1.10",
+  "httpx>=0.27",
+  "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "respx>=0.21"]
+
+[project.scripts]
+automaya-mcp = "automaya_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/automaya_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "maya_plugin", "scripts", "docs", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["src", "maya_plugin", "tests/stubs"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py310"
+src = ["src", "maya_plugin", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B008", "UP006", "UP007", "UP035", "UP031"]
