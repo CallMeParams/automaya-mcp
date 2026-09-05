@@ -24,11 +24,13 @@ import time
 from typing import Any, Deque, Dict, List, Set
 
 try:
-    import maya.api.OpenMaya as om  # type: ignore
     from maya import cmds  # type: ignore
 except ImportError:  # pragma: no cover
-    om = None  # type: ignore
     cmds = None  # type: ignore
+try:
+    import maya.api.OpenMaya as om  # type: ignore
+except ImportError:  # pragma: no cover, the test stub has no OpenMaya
+    om = None  # type: ignore
 
 EVENT_CAPACITY = 5000
 ATTR_SAMPLE_INTERVAL = 1.0 / 60.0  # coalesce attribute spam to 60 Hz per plug

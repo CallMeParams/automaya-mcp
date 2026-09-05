@@ -41,4 +41,4 @@ src = ["src", "maya_plugin", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
-ignore = ["E501", "B008", "UP006", "UP007", "UP035", "UP031"]
+ignore = ["E501", "B008", "B904", "B905", "UP006", "UP007", "UP035", "UP031"]

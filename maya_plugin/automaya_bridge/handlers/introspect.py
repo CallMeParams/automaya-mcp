@@ -58,6 +58,11 @@ def _all_command_names() -> List[str]:
     return names
 
 
+def _is_command(name: str) -> bool:
+    names = _all_command_names()
+    return name in names if names else hasattr(cmds, name)
+
+
 def _parse_help_list(raw: Any) -> List[str]:
     if not raw:
         return []
@@ -103,7 +108,7 @@ def command_help(command_name: str) -> Dict[str, Any]:
         if got and isinstance(got, str) and got.strip():
             text = got
             break
-    known = hasattr(cmds, name) or name in _all_command_names()
+    known = _is_command(name)
     if not text and not known:
         raise BridgeError("no command named %r; try introspect.list_commands(prefix=%r) or introspect.search_docs" % (name, name[:4]))
     flags = _parse_flags(text)
@@ -796,7 +801,7 @@ def api_reference_hint(topic: str) -> Dict[str, Any]:
         out["urls"]["openmaya2"] = OM_DOC_URL % snake
         out["urls"]["openmaya2_index"] = OM_INDEX_URL
         kind.append("openmaya_class")
-    if hasattr(cmds, t) or t in _all_command_names():
+    if _is_command(t):
         out["urls"]["cmds"] = CMDS_DOC_URL % t
         out["urls"]["mel"] = MEL_DOC_URL % t
         kind.append("command")

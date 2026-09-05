@@ -234,15 +234,24 @@ def import_texture_set(maps: Dict[str, str], name: str = "pbrMat", assign_to: Li
         fn = getattr(materials_mod, "create_pbr_network", None)
     except Exception:
         fn = None
-    if fn is not None:
-        try:
-            result = fn(maps=maps, name=name, assign_to=assign_to, shader_type=shader_type)
-            result = dict(result) if isinstance(result, dict) else {"result": result}
-            result["via"] = "materials.create_pbr_network"
-            _log("texture_set", ";".join(maps.values()), [result.get("shader", name)])
-            return result
-        except TypeError:
-            pass  # signature mismatch, fall through to the minimal network
+    # materials.create_pbr_network takes one keyword per map and cannot split a
+    # packed ARM texture, so packed sets take the local wiring path.
+    if fn is not None and not any(k.lower() in ("arm", "bump", "normal_dx") for k in maps):
+        kwargs: Dict[str, Any] = {}
+        for alias, path in maps.items():
+            key = {"diffuse": "base_color", "base_colour": "base_color"}.get(alias.lower(), alias.lower())
+            if key in ("base_color", "roughness", "metalness", "normal", "displacement", "ao", "opacity", "emission") and path:
+                kwargs[key] = path
+        if kwargs:
+            try:
+                result = fn(name=name, shader_type=shader_type, assign_to=assign_to, **kwargs)
+                result = dict(result) if isinstance(result, dict) else {"result": result}
+                result.setdefault("shader", result.get("material", name))
+                result["via"] = "materials.create_pbr_network"
+                _log("texture_set", ";".join(maps.values()), [result["shader"]])
+                return result
+            except TypeError:
+                pass  # signature drift, fall through to the minimal network
     result = _minimal_pbr_network(maps, name, assign_to, shader_type)
     result["via"] = "assets.minimal"
     _log("texture_set", ";".join(maps.values()), [result["shader"]])
