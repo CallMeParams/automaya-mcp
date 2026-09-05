@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import socket
+import time
 
 import pytest
 from tests.conftest import _free_port, parse
@@ -150,9 +151,9 @@ def test_marker_reaches_raw_subscriber(fake_maya):
     try:
         hello = _readline(client)
         assert hello["kind"] == "hello" and hello["protocol"] == 1 and hello["event_port"] == port and hello["unit"] == "cm"
-        for _ in range(50):
-            if events.BUS.broadcaster.subscriber_count():
-                break
+        deadline = time.time() + 5
+        while time.time() < deadline and not events.BUS.broadcaster.subscriber_count():
+            time.sleep(0.02)
         out = livelink.emit_marker("sync_a", {"take": 3})
         assert out["delivered_to"] == 1 and out["event"]["kind"] == "marker"
         line = _readline(client)

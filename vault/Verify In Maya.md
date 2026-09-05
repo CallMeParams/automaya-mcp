@@ -17,3 +17,5 @@ The code was built and tested against a stub; the review pass fixed the API mism
 10. Console dock: check `workspaceControl` docking beside the Attribute Editor on first launch and that the REPL Ctrl+Enter shortcut fires.
 
 Low priority items from the security review, not yet changed: REPL runs outside an undo chunk; `events._node_callbacks` never shrinks (prune on node_removed); `discover_ports` blocks the event loop briefly; provider download errors echo presigned URLs; no size cap on streamed downloads.
+
+Craft layer additions to check live: `aiPhysicalSky.azimuth` convention (handler passes azimuth from north minus 90), `polyCube` face index ordering used by `procgen.building` facade cuts, `polyBoolOp` cutters in `room_shell`, `cmds.imagePlane(camera=..., fileName=...)` fit in `photo.camera_from_photo`, and the gear Settings dialog layout (PySide2 code was reviewed, not executed).

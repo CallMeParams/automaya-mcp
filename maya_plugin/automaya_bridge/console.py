@@ -4,7 +4,10 @@ Tabs:
   Console   live log of every command the agent runs, with results and errors
   Changes   the OpenMaya change feed (what the human or the agent modified)
   REPL      run Python in Maya with the same undo wrapper the agent uses
-  Settings  port, auto start, integrations, provider API keys, safe mode
+
+The gear button in the header opens the Settings dialog
+(``settings_dialog.SettingsDialog``): general, connection, AI 3D API keys
+with a Test button per provider, asset libraries, live link and safe mode.
 
 Opens with ``automaya_bridge.show_console()`` or from the AutoMaya menu.
 """
@@ -14,7 +17,7 @@ import json
 import time
 from typing import Any, Dict
 
-from . import events, prefs, protocol, server
+from . import events, prefs, protocol, server, settings_dialog
 
 try:
     from maya import OpenMayaUI as omui
@@ -37,16 +40,6 @@ _LEVEL_COLORS = {
     "repl": "#e3c8ff",
 }
 
-INTEGRATION_LABELS = [
-    ("polyhaven", "Poly Haven (free HDRIs, textures, models)", []),
-    ("sketchfab", "Sketchfab", ["SKETCHFAB_API_TOKEN"]),
-    ("polypizza", "Poly Pizza", ["POLYPIZZA_API_KEY"]),
-    ("tripo", "Tripo 3D", ["TRIPO_API_KEY"]),
-    ("meshy", "Meshy", ["MESHY_API_KEY"]),
-    ("rodin", "Hyper3D Rodin (main site key or FAL key)", ["RODIN_API_KEY", "FAL_KEY"]),
-    ("hunyuan", "Tencent Hunyuan3D (official or local URL)", ["HUNYUAN_SECRET_ID", "HUNYUAN_SECRET_KEY", "HUNYUAN_LOCAL_URL"]),
-    ("higgsfield", "Higgsfield", ["HIGGSFIELD_API_KEY", "HIGGSFIELD_API_SECRET"]),
-]
 
 
 def _maya_main_window() -> QtWidgets.QWidget | None:
@@ -101,6 +94,12 @@ if HAVE_QT:
             header.addWidget(QtWidgets.QLabel("Port"))
             header.addWidget(self.port_spin)
             header.addWidget(self.toggle_btn)
+            self.settings_btn = QtWidgets.QToolButton()
+            self.settings_btn.setText("\u2699")
+            self.settings_btn.setToolTip("Settings (ports, API keys, safe mode)")
+            self.settings_btn.setAutoRaise(True)
+            self.settings_btn.clicked.connect(self._open_settings)
+            header.addWidget(self.settings_btn)
             layout.addLayout(header)
 
             self.tabs = QtWidgets.QTabWidget()
@@ -136,7 +135,10 @@ if HAVE_QT:
             self.stream_btn = QtWidgets.QPushButton("Start broadcast")
             self.stream_btn.clicked.connect(self._toggle_stream)
             self.transform_only = QtWidgets.QCheckBox("Transforms only")
+            self.transform_only.setChecked(bool(self._prefs.get("transform_only", True)))
+            events.BUS.transform_only = self.transform_only.isChecked()
             self.transform_only.toggled.connect(lambda v: setattr(events.BUS, "transform_only", v))
+            self.event_port = int(self._prefs.get("event_port", protocol.DEFAULT_EVENT_PORT))
             erow.addWidget(self.events_btn)
             erow.addWidget(self.stream_btn)
             erow.addWidget(self.transform_only)
@@ -156,49 +158,6 @@ if HAVE_QT:
             rl.addWidget(run)
             self.tabs.addTab(repl, "REPL")
 
-            # settings tab
-            settings = QtWidgets.QScrollArea()
-            settings.setWidgetResizable(True)
-            inner = QtWidgets.QWidget()
-            sl = QtWidgets.QFormLayout(inner)
-            self.auto_start = QtWidgets.QCheckBox("Start bridge when Maya launches")
-            self.auto_start.setChecked(bool(self._prefs.get("auto_start", True)))
-            self.auto_start.toggled.connect(lambda v: self._save_pref("auto_start", v))
-            sl.addRow(self.auto_start)
-            self.auto_events = QtWidgets.QCheckBox("Track scene changes automatically")
-            self.auto_events.setChecked(bool(self._prefs.get("auto_events", True)))
-            self.auto_events.toggled.connect(lambda v: self._save_pref("auto_events", v))
-            sl.addRow(self.auto_events)
-            self.safe_mode = QtWidgets.QCheckBox("Safe mode (block arbitrary Python from the agent)")
-            self.safe_mode.setChecked(bool(self._prefs.get("safe_mode", False)))
-            self.safe_mode.toggled.connect(lambda v: self._save_pref("safe_mode", v))
-            sl.addRow(self.safe_mode)
-            self.event_port = QtWidgets.QSpinBox()
-            self.event_port.setRange(1024, 65535)
-            self.event_port.setValue(int(self._prefs.get("event_port", protocol.DEFAULT_EVENT_PORT)))
-            self.event_port.valueChanged.connect(lambda v: self._save_pref("event_port", v))
-            sl.addRow("Broadcast port", self.event_port)
-            sl.addRow(QtWidgets.QLabel("<b>Integrations</b>"))
-            self.key_fields: Dict[str, QtWidgets.QLineEdit] = {}
-            for name, label, keys in INTEGRATION_LABELS:
-                box = QtWidgets.QCheckBox(label)
-                box.setChecked(bool(self._prefs.get("integrations", {}).get(name, False)))
-                box.toggled.connect(lambda v, n=name: prefs.set_integration(n, v))
-                sl.addRow(box)
-                for key in keys:
-                    field = QtWidgets.QLineEdit()
-                    field.setEchoMode(QtWidgets.QLineEdit.Password if "URL" not in key else QtWidgets.QLineEdit.Normal)
-                    field.setPlaceholderText("env %s or paste here" % key)
-                    if prefs.get_key(key):
-                        field.setText(prefs.load().get("keys", {}).get(key, ""))
-                        if not field.text():
-                            field.setPlaceholderText("set from environment")
-                    field.editingFinished.connect(lambda k=key, f=field: prefs.set_key(k, f.text().strip()))
-                    self.key_fields[key] = field
-                    sl.addRow("    " + key, field)
-            settings.setWidget(inner)
-            self.tabs.addTab(settings, "Settings")
-
         # behaviour ----------------------------------------------------------
         def eventFilter(self, obj: Any, ev: Any) -> bool:  # noqa: N802
             if obj is self.repl_input and ev.type() == QtCore.QEvent.KeyPress:
@@ -211,6 +170,17 @@ if HAVE_QT:
             data = prefs.load()
             data[key] = value
             prefs.save(data)
+
+        def _open_settings(self) -> None:
+            if settings_dialog.open_settings(self) != QtWidgets.QDialog.Accepted:
+                return
+            self._prefs = prefs.load()
+            srv = server.get_server()
+            if not (srv is not None and srv.running):
+                self.port_spin.setValue(int(self._prefs.get("port", protocol.DEFAULT_PORT)))
+            self.event_port = int(self._prefs.get("event_port", protocol.DEFAULT_EVENT_PORT))
+            self.transform_only.setChecked(bool(self._prefs.get("transform_only", True)))
+            server.LOG.add("info", "settings saved")
 
         def _toggle_server(self) -> None:
             srv = server.get_server()
@@ -238,7 +208,7 @@ if HAVE_QT:
                 bc.stop()
                 events.BUS.broadcaster = None
             else:
-                bc = events.Broadcaster(port=int(self.event_port.value()))
+                bc = events.Broadcaster(port=int(self.event_port))
                 try:
                     bc.start()
                     events.BUS.broadcaster = bc

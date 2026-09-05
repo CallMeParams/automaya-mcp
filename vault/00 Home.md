@@ -19,9 +19,11 @@ Knowledge base for the AutoMaya MCP project: an MCP server plus in-Maya bridge t
 - [[Agent Playbook]] how Claude should behave when using these tools
 - [[Roadmap]] what is next
 - [[Verify In Maya]] items to confirm on a live Maya 2024
+- [[Astra Research]] what is known about OpenAI Astra and what transfers
+- [[Craft Layer]] procgen, lighting science, lookdev, critique, photo, plan
 
 ## Quick facts
 - Repo: `automaya-mcp`, package `automaya_mcp` (server) and `automaya_bridge` (plugin)
 - Ports: 9877 commands, 9878 event broadcast, loopback only
-- 198 tools in 13 modules, 3 prompts, 323 tests
+- 244 tools in 19 modules, 6 prompts, 468 tests
 - Owner: Adam Waters, Senior Previs Artist, Sydney

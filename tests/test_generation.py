@@ -17,7 +17,7 @@ from automaya_mcp.tools import generation as gen_tools
 
 @pytest.fixture(autouse=True)
 def _env(monkeypatch, tmp_path):
-    for var in ("TRIPO_API_KEY", "MESHY_API_KEY", "RODIN_API_KEY", "FAL_KEY", "HUNYUAN_SECRET_ID", "HUNYUAN_SECRET_KEY", "HUNYUAN_LOCAL_URL"):
+    for var in ("TRIPO_API_KEY", "MESHY_API_KEY", "RODIN_API_KEY", "FAL_KEY", "HUNYUAN_SECRET_ID", "HUNYUAN_SECRET_KEY", "HUNYUAN_LOCAL_URL", "HUNYUAN_WORLD_SUBMIT", "HUNYUAN_WORLD_QUERY", "REPLICATE_API_TOKEN"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("AUTOMAYA_DOWNLOAD_DIR", str(tmp_path / "dl"))
     registry.reset()
@@ -77,7 +77,7 @@ def test_gen_import_result_missing_file(fake_maya):
 # tool integration ----------------------------------------------------------------
 async def test_list_providers_tool(call_tool):
     data = parse(await call_tool("maya_gen3d_list_providers"))
-    assert [p["name"] for p in data["providers"]] == ["tripo", "meshy", "rodin", "hunyuan", "higgsfield"]
+    assert [p["name"] for p in data["providers"]] == ["tripo", "meshy", "rodin", "hunyuan", "higgsfield", "replicate"]
     assert "TRIPO_API_KEY" in data["providers"][0]["configure"]
 
 
@@ -163,3 +163,27 @@ async def test_rig_retexture_remesh_convert_tools(call_tool, monkeypatch):
         assert parse(await call_tool("maya_gen3d_convert", {"params": {"job_id": "x", "format": "obj"}}))["job_id"] == "cv"
     text = await call_tool("maya_gen3d_remesh", {"params": {"provider": "tripo", "job_id": "x"}})
     assert "does not support remeshing" in text
+
+
+async def test_hunyuan_post_and_world_tools(call_tool, monkeypatch):
+    monkeypatch.setenv("HUNYUAN_SECRET_ID", "id")
+    monkeypatch.setenv("HUNYUAN_SECRET_KEY", "key")
+    with respx.mock(base_url="https://ai3d.tencentcloudapi.com") as mock:
+        route = mock.post("/").mock(side_effect=[
+            httpx.Response(200, json={"Response": {"JobId": "rf"}}),
+            httpx.Response(200, json={"Response": {"JobId": "w"}}),
+        ])
+        data = parse(await call_tool("maya_gen3d_hunyuan_post", {"params": {"job_id": "https://cdn.test/m.glb", "op": "reduce_face", "polygon_type": "quadrilateral"}}))
+        assert data["job_id"] == "official:reduce_face:rf" and route.calls[0].request.headers["X-TC-Action"] == "SubmitReduceFaceJob"
+        assert ("hunyuan", "official:reduce_face:rf") in gen_tools.JOBS
+        data = parse(await call_tool("maya_gen3d_world", {"params": {"prompt": "a quiet harbour at dusk"}}))
+        assert data["job_id"] == "official:world:w" and route.calls[1].request.headers["X-TC-Action"] == "SubmitHunyuanWorldJob"
+    text = await call_tool("maya_gen3d_hunyuan_post", {"params": {"job_id": "x", "op": "bake"}})
+    assert "unknown post job" in text
+    text = await call_tool("maya_gen3d_world", {"params": {}})
+    assert "needs a prompt or an image" in text
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8")
+    with respx.mock(base_url="https://api.replicate.com/v1") as mock:
+        create = mock.post("/models/some/world/predictions").mock(return_value=httpx.Response(201, json={"id": "p1", "status": "starting"}))
+        data = parse(await call_tool("maya_gen3d_world", {"params": {"provider": "replicate", "image": "https://img.test/pano.jpg", "extra": {"model": "some/world"}}}))
+        assert data["job_id"] == "p1" and json.loads(create.calls[0].request.content)["input"]["image"] == "https://img.test/pano.jpg"

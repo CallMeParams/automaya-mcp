@@ -1,4 +1,4 @@
-"""AI 3D generation tools: Tripo, Meshy, Rodin, Hunyuan3D, Higgsfield.
+"""AI 3D generation tools: Tripo, Meshy, Rodin, Hunyuan3D, Higgsfield, Replicate.
 
 Network calls happen here on the server. Maya only receives a local path via
 ``gen.import_result``. A small in-memory job store keeps the last GenJob per
@@ -71,12 +71,12 @@ class GenOptions(BaseModel):
     negative_prompt: str | None = Field(default=None, description="What to avoid (Tripo, Meshy)")
     quad: bool | None = Field(default=None, description="Ask for quad topology where supported (Tripo convert, Rodin)")
     auto_refine: bool = Field(default=True, description="Meshy only: automatically run the refine (texture) stage after preview")
-    extra: Dict[str, Any] = Field(default_factory=dict, description="Provider specific passthrough options (e.g. Meshy art_style, Tripo model_version, Rodin tier)")
+    extra: Dict[str, Any] = Field(default_factory=dict, description="Provider specific passthrough options (e.g. Meshy art_style, Tripo model_version, Rodin tier, Hunyuan generate_type Normal|LowPoly|Geometry|Sketch and polygon_type triangle|quadrilateral, Replicate model owner/name plus raw model inputs)")
 
 
 class TextTo3DInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    provider: str = Field(..., description="tripo | meshy | rodin | hunyuan | higgsfield", examples=["tripo"])
+    provider: str = Field(..., description="tripo | meshy | rodin | hunyuan | higgsfield | replicate", examples=["tripo"])
     prompt: str = Field(..., min_length=2, max_length=2000, description="Description of the object. Be concrete: material, style, single object, neutral pose.")
     options: GenOptions = Field(default_factory=GenOptions)
     wait: bool = Field(default=False, description="Block and poll until done or max_wait elapses")
@@ -85,10 +85,10 @@ class TextTo3DInput(BaseModel):
 
 class ImageTo3DInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    provider: str = Field(..., description="tripo | meshy | rodin | hunyuan | higgsfield")
+    provider: str = Field(..., description="tripo | meshy | rodin | hunyuan | higgsfield | replicate")
     image: str = Field(..., description="Local image path or http(s) URL. Local files are uploaded or inlined as needed.", examples=["/tmp/ref.png"])
     prompt: str | None = Field(default=None, description="Optional text hint (Rodin, Hunyuan)")
-    extra_images: List[str] | None = Field(default=None, description="More views of the same object for multiview providers")
+    extra_images: List[Any] | None = Field(default=None, description="More views of the same object for multiview providers. Hunyuan: up to 8 entries, either a path/URL or {view: left|right|back|front|top|bottom, image: path or URL}")
     options: GenOptions = Field(default_factory=GenOptions)
     wait: bool = Field(default=False)
     max_wait: float = Field(default=240.0, ge=5, le=1800)
@@ -149,6 +149,32 @@ class RemeshInput(BaseModel):
     max_wait: float = Field(default=240.0, ge=5, le=1800)
 
 
+class HunyuanPostInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(..., min_length=1, description="A finished Hunyuan job id (official:...) or a direct model URL (glb/obj/fbx)")
+    op: str = Field(..., description="texture | uv | rig | reduce_face", examples=["texture"])
+    prompt: str | None = Field(default=None, description="texture: what the surface should look like")
+    image: str | None = Field(default=None, description="texture: reference image path or URL")
+    pbr: bool | None = Field(default=None, description="texture: generate PBR maps")
+    keep_uv: bool | None = Field(default=None, description="texture: keep the model's existing UVs")
+    texture_size: int | None = Field(default=None, ge=720, le=4096, description="texture: map resolution")
+    motion_type: int | None = Field(default=None, ge=1, le=48, description="rig: preset motion id")
+    polygon_type: str | None = Field(default=None, description="reduce_face: triangle | quadrilateral")
+    face_level: str | None = Field(default=None, description="reduce_face: high | medium | low")
+    wait: bool = Field(default=False)
+    max_wait: float = Field(default=240.0, ge=5, le=1800)
+
+
+class WorldInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(default="hunyuan", description="hunyuan (Tencent Hunyuan 3D World) or replicate with a world model in extra")
+    prompt: str | None = Field(default=None, max_length=2000, description="Scene description")
+    image: str | None = Field(default=None, description="Panorama or reference image path or URL")
+    extra: Dict[str, Any] = Field(default_factory=dict, description="Passthrough (Replicate: model owner/name and raw inputs)")
+    wait: bool = Field(default=False)
+    max_wait: float = Field(default=600.0, ge=5, le=1800)
+
+
 class ConvertInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider: str = Field(default="tripo", description="tripo")
@@ -179,9 +205,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(name="maya_gen3d_list_providers", annotations={"title": "List AI 3D providers", **EXTERNAL_READ})
     async def maya_gen3d_list_providers() -> str:
         """List the AI 3D generation providers (Tripo, Meshy, Rodin, Hunyuan3D,
-        Higgsfield): whether each is configured, its capabilities (text, image,
-        rig, retexture, remesh, convert, formats) and which environment variables
-        enable it. Call before generating to pick a configured provider."""
+        Higgsfield, Replicate): whether each is configured, its capabilities
+        (text, image, rig, retexture, remesh, convert, post_jobs, world,
+        formats) and which environment variables enable it. Call before
+        generating to pick a configured provider."""
         return dumps({"providers": list_providers(), "download_dir": download_dir(), "note": FORMAT_NOTE})
 
     @mcp.tool(name="maya_gen3d_text_to_3d", annotations={"title": "Generate 3D from text", **EXTERNAL_WRITE})
@@ -355,6 +382,53 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         try:
             provider = get_provider(params.provider)
             job = remember(await provider.convert(params.job_id, params.format, quad=params.quad, face_limit=params.face_limit, fbx_preset=params.fbx_preset))
+            if params.wait:
+                job = await wait_for(provider, job, params.max_wait, context)
+            return dumps(_describe_wait(job, params.wait, params.max_wait))
+        except Exception as exc:  # noqa: BLE001
+            return _err(exc)
+
+    @mcp.tool(name="maya_gen3d_hunyuan_post", annotations={"title": "Hunyuan3D post job (texture, uv, rig, reduce_face)", **EXTERNAL_WRITE})
+    async def maya_gen3d_hunyuan_post(params: HunyuanPostInput, context: Context = None) -> str:  # type: ignore[assignment]
+        """Run a Tencent Hunyuan3D post job on a finished generation: texture
+        (SubmitTextureTo3DJob from a prompt or reference image), uv (UV unwrap),
+        rig (auto rig and skin, fbx in), reduce_face (retopology to triangle or
+        quad). Returns a new job id (official:<op>:<id>) to poll and import."""
+        try:
+            provider = get_provider("hunyuan")
+            opts: Dict[str, Any] = {}
+            for key in ("prompt", "image", "pbr", "keep_uv", "texture_size", "motion_type", "polygon_type", "face_level"):
+                value = getattr(params, key)
+                if value is not None:
+                    opts[key] = value
+            job = remember(await provider.post_job(params.op, params.job_id, **opts), params.prompt)
+            if params.wait:
+                job = await wait_for(provider, job, params.max_wait, context)
+            return dumps(_describe_wait(job, params.wait, params.max_wait))
+        except Exception as exc:  # noqa: BLE001
+            return _err(exc)
+
+    @mcp.tool(name="maya_gen3d_world", annotations={"title": "Generate a 3D world / scene", **EXTERNAL_WRITE})
+    async def maya_gen3d_world(params: WorldInput, context: Context = None) -> str:  # type: ignore[assignment]
+        """Generate an explorable 3D world from a prompt or a panorama image.
+        hunyuan uses Tencent's Hunyuan 3D World actions (names are set by
+        HUNYUAN_WORLD_SUBMIT / HUNYUAN_WORLD_QUERY until verified); replicate
+        runs whatever world model you name in extra.model. Returns a job id to
+        poll and import like any generation."""
+        try:
+            if not params.prompt and not params.image:
+                return "Error: world generation needs a prompt or an image"
+            provider = get_provider(params.provider)
+            if hasattr(provider, "submit_world"):
+                job = await provider.submit_world(prompt=params.prompt, image=params.image, **(params.extra or {}))
+            elif params.image:
+                opts = dict(params.extra or {})
+                if params.prompt:
+                    opts["prompt"] = params.prompt
+                job = await provider.submit_image(params.image, **opts)
+            else:
+                job = await provider.submit_text(params.prompt or "", **(params.extra or {}))
+            job = remember(job, params.prompt)
             if params.wait:
                 job = await wait_for(provider, job, params.max_wait, context)
             return dumps(_describe_wait(job, params.wait, params.max_wait))

@@ -1,4 +1,4 @@
-"""Provider contracts mocked with respx: Tripo, Meshy, Rodin, Hunyuan, Higgsfield."""
+"""Provider contracts mocked with respx: Tripo, Meshy, Rodin, Hunyuan, Higgsfield, Replicate."""
 from __future__ import annotations
 
 import json
@@ -13,13 +13,14 @@ from automaya_mcp.providers.base import raise_for_status
 from automaya_mcp.providers.higgsfield import HiggsfieldProvider
 from automaya_mcp.providers.hunyuan import HunyuanProvider, tc3_headers
 from automaya_mcp.providers.meshy import MeshyProvider
+from automaya_mcp.providers.replicate import ReplicateProvider, outputs_from, split_model
 from automaya_mcp.providers.rodin import RodinProvider
 from automaya_mcp.providers.tripo import TripoProvider
 
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch, tmp_path):
-    for var in ("TRIPO_API_KEY", "MESHY_API_KEY", "RODIN_API_KEY", "FAL_KEY", "RODIN_MODE", "HUNYUAN_SECRET_ID", "HUNYUAN_SECRET_KEY", "HUNYUAN_LOCAL_URL", "HUNYUAN_MODE", "HIGGSFIELD_API_KEY", "HIGGSFIELD_API_SECRET", "HIGGSFIELD_3D_ENDPOINT"):
+    for var in ("TRIPO_API_KEY", "MESHY_API_KEY", "RODIN_API_KEY", "FAL_KEY", "RODIN_MODE", "HUNYUAN_SECRET_ID", "HUNYUAN_SECRET_KEY", "HUNYUAN_LOCAL_URL", "HUNYUAN_MODE", "HIGGSFIELD_API_KEY", "HIGGSFIELD_API_SECRET", "HIGGSFIELD_3D_ENDPOINT", "HUNYUAN_REGION", "HUNYUAN_WORLD_SUBMIT", "HUNYUAN_WORLD_QUERY", "REPLICATE_API_TOKEN", "REPLICATE_3D_MODEL"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("AUTOMAYA_DOWNLOAD_DIR", str(tmp_path / "dl"))
     registry.reset()
@@ -39,7 +40,7 @@ def png(tmp_path):
 # registry + errors --------------------------------------------------------
 def test_registry_lists_all_unconfigured():
     names = [p["name"] for p in list_providers()]
-    assert names == ["tripo", "meshy", "rodin", "hunyuan", "higgsfield"]
+    assert names == ["tripo", "meshy", "rodin", "hunyuan", "higgsfield", "replicate"]
     assert all(p["configured"] is False for p in list_providers())
     with pytest.raises(ProviderError) as exc:
         get_provider("nope")
@@ -328,6 +329,196 @@ async def test_hunyuan_local(monkeypatch, png):
         assert j.status == "succeeded" and j.outputs["glb"].startswith("file://")
         path = await p.download(j, "glb")
         assert open(path, "rb").read() == b"glTF-local"
+
+
+async def test_hunyuan_multiview_generate_type_polygon(monkeypatch, png):
+    monkeypatch.setenv("HUNYUAN_SECRET_ID", "id")
+    monkeypatch.setenv("HUNYUAN_SECRET_KEY", "key")
+    monkeypatch.setenv("HUNYUAN_REGION", "ap-singapore")
+    p = get_provider("hunyuan")
+    caps = p.capabilities()
+    assert caps["model"] == "3.1" and caps["rig"] and caps["post_jobs"] == ["reduce_face", "rig", "texture", "uv"]
+    with respx.mock(base_url="https://ai3d.tencentcloudapi.com") as mock:
+        route = mock.post("/").mock(return_value=httpx.Response(200, json={"Response": {"JobId": "mv-1"}}))
+        views = ["https://v.test/left.png", {"view": "back", "image": png}, {"view": "right", "image": "https://v.test/right.png"}]
+        job = await p.submit_image("https://v.test/front.png", extra_images=views, generate_type="LowPoly", polygon_type="quadrilateral", pbr=False)
+        req = route.calls[0].request
+        assert req.headers["X-TC-Action"] == "SubmitHunyuanTo3DProJob" and req.headers["X-TC-Region"] == "ap-singapore"
+        body = json.loads(req.content)
+        assert body["Model"] == "3.1" and body["GenerateType"] == "LowPoly" and body["PolygonType"] == "quadrilateral" and body["EnablePBR"] is False
+        assert body["ImageUrl"] == "https://v.test/front.png"
+        assert [v["ViewType"] for v in body["MultiViewImages"]] == ["left", "back", "right"]
+        assert body["MultiViewImages"][0]["ViewImageUrl"] == "https://v.test/left.png"
+        assert "ViewImageBase64" in body["MultiViewImages"][1]
+        assert job.job_id == "official:mv-1"
+        with pytest.raises(ProviderError) as exc:
+            await p.submit_text("x", generate_type="Fancy")
+        assert "generate_type" in str(exc.value)
+        with pytest.raises(ProviderError) as exc:
+            await p.submit_image("https://v.test/a.png", extra_images=["https://v.test/%d.png" % i for i in range(9)])
+        assert "at most 8" in str(exc.value)
+        with pytest.raises(ProviderError) as exc:
+            await p.submit_image("https://v.test/a.png", extra_images=[{"view": "diagonal", "image": "https://v.test/d.png"}])
+        assert "view type" in str(exc.value)
+
+
+async def test_hunyuan_post_jobs(monkeypatch, png):
+    monkeypatch.setenv("HUNYUAN_SECRET_ID", "id")
+    monkeypatch.setenv("HUNYUAN_SECRET_KEY", "key")
+    p = get_provider("hunyuan")
+    done = {"Response": {"Status": "DONE", "ResultFile3Ds": [{"Type": "GLB", "Url": "https://t.test/a.glb"}, {"Type": "FBX", "Url": "https://t.test/a.fbx"}]}}
+    with respx.mock(base_url="https://ai3d.tencentcloudapi.com") as mock:
+        route = mock.post("/").mock(side_effect=[
+            httpx.Response(200, json=done),  # source poll for texture
+            httpx.Response(200, json={"Response": {"JobId": "tx-1"}}),
+            httpx.Response(200, json={"Response": {"Status": "RUN"}}),
+            httpx.Response(200, json=done),  # source poll for uv
+            httpx.Response(200, json={"Response": {"JobId": "uv-1"}}),
+            httpx.Response(200, json=done),  # source poll for rig
+            httpx.Response(200, json={"Response": {"JobId": "rg-1"}}),
+            httpx.Response(200, json={"Response": {"Status": "DONE", "ResultFile3Ds": [{"Type": "FBX", "Url": "https://t.test/rigged.fbx"}]}}),
+            httpx.Response(200, json={"Response": {"JobId": "rf-1"}}),  # reduce_face from a URL, no source poll
+        ])
+        job = await p.post_job("texture", "official:job-1", prompt="rusty iron", image=png, pbr=True, keep_uv=True, texture_size=2048)
+        assert route.calls[0].request.headers["X-TC-Action"] == "QueryHunyuanTo3DProJob"
+        assert route.calls[1].request.headers["X-TC-Action"] == "SubmitTextureTo3DJob"
+        body = json.loads(route.calls[1].request.content)
+        assert body["File3D"] == {"Type": "GLB", "Url": "https://t.test/a.glb"} and body["Prompt"] == "rusty iron" and body["Model"] == "3.1"
+        assert "Base64" in body["Image"] and body["EnablePBR"] is True and body["EnableKeepUV"] is True and body["TextureSize"] == 2048
+        assert job.job_id == "official:texture:tx-1" and job.raw["kind"] == "texture"
+        j = await p.poll(job.job_id)
+        assert route.calls[2].request.headers["X-TC-Action"] == "QueryTextureTo3DJob"
+        assert json.loads(route.calls[2].request.content) == {"JobId": "tx-1"} and j.status == "running" and j.job_id == "official:texture:tx-1"
+
+        job = await p.post_job("uv", "official:job-1")
+        assert route.calls[4].request.headers["X-TC-Action"] == "SubmitHunyuanTo3DUVJob"
+        assert json.loads(route.calls[4].request.content) == {"File": {"Type": "GLB", "Url": "https://t.test/a.glb"}}
+        assert job.job_id == "official:uv:uv-1"
+
+        job = await p.rig("official:job-1", motion_type=3)
+        assert route.calls[6].request.headers["X-TC-Action"] == "SubmitAutoRiggingJob"
+        assert json.loads(route.calls[6].request.content) == {"File3D": {"Type": "FBX", "Url": "https://t.test/a.fbx"}, "MotionType": 3}
+        j = await p.poll(job.job_id)
+        assert route.calls[7].request.headers["X-TC-Action"] == "QueryAutoRiggingJob"
+        assert j.status == "succeeded" and j.outputs["fbx"] == "https://t.test/rigged.fbx"
+
+        job = await p.remesh("https://cdn.test/mesh.obj", topology="quad", face_level="low")
+        assert route.calls[8].request.headers["X-TC-Action"] == "SubmitReduceFaceJob"
+        assert json.loads(route.calls[8].request.content) == {"File3D": {"Type": "OBJ", "Url": "https://cdn.test/mesh.obj"}, "PolygonType": "quadrilateral", "FaceLevel": "low"}
+        assert job.job_id == "official:reduce_face:rf-1"
+    with pytest.raises(ProviderError) as exc:
+        await p.post_job("bake", "official:job-1")
+    assert "unknown post job" in str(exc.value)
+
+
+async def test_hunyuan_post_job_needs_official_route(monkeypatch):
+    monkeypatch.setenv("HUNYUAN_LOCAL_URL", "http://localhost:8081")
+    p = get_provider("hunyuan")
+    with pytest.raises(ProviderError) as exc:
+        await p.post_job("uv", "local:abc")
+    assert "official" in str(exc.value)
+    with pytest.raises(ProviderError):
+        await p.submit_world(prompt="a forest")
+
+
+async def test_hunyuan_world_actions_from_env_and_invalid_action(monkeypatch, png):
+    monkeypatch.setenv("HUNYUAN_SECRET_ID", "id")
+    monkeypatch.setenv("HUNYUAN_SECRET_KEY", "key")
+    p = get_provider("hunyuan")
+    with respx.mock(base_url="https://ai3d.tencentcloudapi.com") as mock:
+        route = mock.post("/").mock(side_effect=[
+            httpx.Response(200, json={"Response": {"JobId": "w-1"}}),
+            httpx.Response(200, json={"Response": {"Status": "WAIT"}}),
+            httpx.Response(200, json={"Response": {"Error": {"Code": "InvalidAction", "Message": "no such action"}}}),
+        ])
+        job = await p.submit_world(prompt="a mossy forest clearing", image=png)
+        assert route.calls[0].request.headers["X-TC-Action"] == "SubmitHunyuanWorldJob"
+        body = json.loads(route.calls[0].request.content)
+        assert body["Prompt"] == "a mossy forest clearing" and "ImageBase64" in body
+        assert job.job_id == "official:world:w-1"
+        j = await p.poll(job.job_id)
+        assert route.calls[1].request.headers["X-TC-Action"] == "QueryHunyuanWorldJob" and j.status == "queued"
+        with pytest.raises(ProviderError) as exc:
+            await p.submit_world(prompt="again")
+        assert "unverified" in str(exc.value) and "HUNYUAN_WORLD_SUBMIT" in str(exc.value)
+    with pytest.raises(ProviderError):
+        await p.submit_world()
+    monkeypatch.setenv("HUNYUAN_WORLD_SUBMIT", "SubmitHunyuanWorldProJob")
+    monkeypatch.setenv("HUNYUAN_WORLD_QUERY", "QueryHunyuanWorldProJob")
+    with respx.mock(base_url="https://ai3d.tencentcloudapi.com") as mock:
+        route = mock.post("/").mock(side_effect=[
+            httpx.Response(200, json={"Response": {"JobId": "w-2"}}),
+            httpx.Response(200, json={"Response": {"Status": "DONE", "ResultFile3Ds": [{"Type": "GLB", "Url": "https://t.test/world.glb"}]}}),
+        ])
+        job = await p.submit_world(image="https://img.test/pano.jpg")
+        assert route.calls[0].request.headers["X-TC-Action"] == "SubmitHunyuanWorldProJob"
+        assert json.loads(route.calls[0].request.content) == {"ImageUrl": "https://img.test/pano.jpg"}
+        j = await p.poll(job.job_id)
+        assert route.calls[1].request.headers["X-TC-Action"] == "QueryHunyuanWorldProJob" and j.outputs["glb"].endswith("world.glb")
+
+
+# Replicate ------------------------------------------------------------------------
+def test_replicate_helpers():
+    assert split_model("tencent/hunyuan-3d-3.1") == ("tencent", "hunyuan-3d-3.1", None)
+    assert split_model("a/b:abc123") == ("a", "b", "abc123")
+    with pytest.raises(ProviderError):
+        split_model("nolash")
+    assert outputs_from("https://r.test/out.glb") == ({"glb": "https://r.test/out.glb"}, None)
+    outs, thumb = outputs_from(["https://r.test/p.png", "https://r.test/m.obj", "https://r.test/file"])
+    assert outs == {"image": "https://r.test/p.png", "obj": "https://r.test/m.obj", "file": "https://r.test/file"} and thumb == "https://r.test/p.png"
+    outs, _ = outputs_from({"mesh": "https://r.test/x?dl=1", "textures": ["https://r.test/t.png"]})
+    assert outs == {"mesh": "https://r.test/x?dl=1", "image": "https://r.test/t.png"}
+    assert outputs_from(None) == ({}, None)
+
+
+async def test_replicate_text_image_poll_download(monkeypatch, png, tmp_path):
+    with pytest.raises(ProviderError) as exc:
+        await ReplicateProvider().submit_text("x")
+    assert "REPLICATE_API_TOKEN" in str(exc.value)
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_tok")
+    p = get_provider("replicate")
+    assert p.configured() and p.capabilities()["model"] == "tencent/hunyuan-3d-3.1"
+    with respx.mock(base_url="https://api.replicate.com/v1") as mock:
+        create = mock.post("/models/tencent/hunyuan-3d-3.1/predictions").mock(return_value=httpx.Response(201, json={"id": "pr1", "status": "starting", "output": None}))
+        mock.get("/predictions/pr1").mock(side_effect=[
+            httpx.Response(200, json={"id": "pr1", "status": "processing", "output": None, "logs": "..."}),
+            httpx.Response(200, json={"id": "pr1", "status": "succeeded", "output": {"mesh": "https://replicate.delivery/x/out.glb", "preview": "https://replicate.delivery/x/p.png"}}),
+        ])
+        job = await p.submit_text("a stone lantern", pbr=True, face_limit=1000, extra_images=None)
+        req = create.calls[0].request
+        assert req.headers["Authorization"] == "Bearer r8_tok" and req.headers["Prefer"] == "wait=0"
+        assert json.loads(req.content) == {"input": {"prompt": "a stone lantern"}}
+        assert job.job_id == "pr1" and job.status == "queued"
+        j = await p.poll("pr1")
+        assert j.status == "running" and "logs" not in j.raw
+        j = await p.poll("pr1")
+        assert j.status == "succeeded" and j.outputs["glb"] == "https://replicate.delivery/x/out.glb" and j.thumbnail_url.endswith("p.png")
+
+        other = mock.post("/models/someone/world-model/predictions").mock(return_value=httpx.Response(201, json={"id": "pr2", "status": "starting"}))
+        await p.submit_image(png, model="someone/world-model", steps=20)
+        body = json.loads(other.calls[0].request.content)
+        assert body["input"]["image"].startswith("data:image/png;base64,") and body["input"]["steps"] == 20
+        versioned = mock.post("/predictions").mock(return_value=httpx.Response(201, json={"id": "pr3", "status": "starting"}))
+        await p.submit_image("https://img.test/a.jpg", model="a/b:deadbeef")
+        assert json.loads(versioned.calls[0].request.content) == {"input": {"image": "https://img.test/a.jpg"}, "version": "deadbeef"}
+        mock.get("/predictions/bad").mock(return_value=httpx.Response(200, json={"id": "bad", "status": "failed", "error": "OOM"}))
+        j = await p.poll("bad")
+        assert j.status == "failed" and "OOM" in j.message
+        mock.get("/predictions/nope").mock(return_value=httpx.Response(401, json={}))
+        with pytest.raises(ProviderError) as exc:
+            await p.poll("nope")
+        assert "REPLICATE_API_TOKEN" in str(exc.value)
+    with respx.mock() as mock:
+        mock.get("https://replicate.delivery/x/out.glb").mock(return_value=httpx.Response(200, content=b"glb-bytes"))
+        succeeded = await _succeeded_replicate(p)
+        path = await p.download(succeeded, "glb")
+    assert path.endswith(".glb") and open(path, "rb").read() == b"glb-bytes"
+
+
+async def _succeeded_replicate(p):
+    with respx.mock(base_url="https://api.replicate.com/v1") as mock:
+        mock.get("/predictions/pr1").mock(return_value=httpx.Response(200, json={"id": "pr1", "status": "succeeded", "output": "https://replicate.delivery/x/out.glb"}))
+        return await p.poll("pr1")
 
 
 # Higgsfield ---------------------------------------------------------------------

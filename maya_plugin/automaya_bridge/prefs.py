@@ -21,8 +21,12 @@ PROVIDER_KEYS = [
     "HUNYUAN_SECRET_ID",
     "HUNYUAN_SECRET_KEY",
     "HUNYUAN_LOCAL_URL",
+    "HUNYUAN_REGION",
     "HIGGSFIELD_API_KEY",
     "HIGGSFIELD_API_SECRET",
+    "HIGGSFIELD_3D_ENDPOINT",
+    "REPLICATE_API_TOKEN",
+    "DEPTH_ENDPOINT",
     "SKETCHFAB_API_TOKEN",
     "POLYPIZZA_API_KEY",
 ]
@@ -42,6 +46,7 @@ DEFAULTS: Dict[str, Any] = {
         "rodin": False,
         "hunyuan": False,
         "higgsfield": False,
+        "replicate": False,
     },
     "keys": {},
 }

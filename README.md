@@ -1,6 +1,6 @@
 # AutoMaya MCP
 
-Control Autodesk Maya 2024 from Claude (Desktop, Code, Cursor, any MCP client) with 198 typed tools, an in-Maya console, free asset libraries, AI 3D generation, and a real time change stream built for driving an external viewport such as Unreal.
+Control Autodesk Maya 2024 from Claude (Desktop, Code, Cursor, any MCP client) with 244 typed tools, an in-Maya console, free asset libraries, AI 3D generation, and a real time change stream built for driving an external viewport such as Unreal.
 
 ```
 Claude  <-- MCP stdio -->  automaya_mcp (Python)  <-- framed TCP 9877 -->  AutoMaya bridge inside Maya
@@ -20,7 +20,8 @@ Claude  <-- MCP stdio -->  automaya_mcp (Python)  <-- framed TCP 9877 -->  AutoM
 | Seeing the scene | Text only | Viewport screenshots and Arnold renders returned as images, budgeted scene summaries, problem finder, snapshot diffs |
 | Human edit awareness | None | `maya_drain_changes` tells the agent what you changed by hand |
 | Assets | None | Poly Haven, Sketchfab, Poly Pizza |
-| AI 3D generation | None | Tripo, Meshy, Hyper3D Rodin, Hunyuan3D (cloud + local), Higgsfield hook |
+| AI 3D generation | None | Tripo, Meshy, Hyper3D Rodin, Hunyuan 3D Engine (3.1, world, texture, rig, cloud + local), Replicate, Higgsfield hook |
+| Craft knowledge | None | Procedural generators at real scale, lighting and material science, render critique loop, photo to scene |
 | Program knowledge | None | Command help, node type schemas, plugin/env/UI introspection, offline doc search |
 | External viewport | None | Event broadcast + mesh buffers + scene graph snapshots + USD export, Unreal subscriber included |
 
@@ -31,7 +32,7 @@ pip install -e ".[dev]"          # from this repo (or: pip install automaya-mcp 
 automaya-mcp install-plugin      # writes automaya.mod into ~/Documents/maya/2024/modules
 ```
 
-Restart Maya 2024. An **AutoMaya** menu appears and the console docks next to the Attribute Editor. The bridge starts on port 9877 automatically (change it in the Settings tab).
+Restart Maya 2024. An **AutoMaya** menu appears and the console docks next to the Attribute Editor. The bridge starts on port 9877 automatically (change it from the gear button in the console header).
 
 Add the server to your MCP client:
 
@@ -56,14 +57,14 @@ Ask Claude: "check the Maya status, then build a 35mm shot camera on a crane rig
 | `AUTOMAYA_SAFE_MODE=1` | block shell, network and filesystem access inside `maya_execute_python` |
 | `AUTOMAYA_MODULES` | comma list to load only some tool modules (smaller context), e.g. `core,scene,modeling,previs,intelligence` |
 | `AUTOMAYA_DOWNLOAD_DIR` | where generated and downloaded assets land |
-| `TRIPO_API_KEY`, `MESHY_API_KEY`, `RODIN_API_KEY` or `FAL_KEY`, `HUNYUAN_SECRET_ID` + `HUNYUAN_SECRET_KEY` or `HUNYUAN_LOCAL_URL`, `HIGGSFIELD_API_KEY` + `HIGGSFIELD_API_SECRET` (+ `HIGGSFIELD_3D_ENDPOINT`) | 3D generation providers |
+| `TRIPO_API_KEY`, `MESHY_API_KEY`, `RODIN_API_KEY` or `FAL_KEY`, `HUNYUAN_SECRET_ID` + `HUNYUAN_SECRET_KEY` or `HUNYUAN_LOCAL_URL`, `HIGGSFIELD_API_KEY` + `HIGGSFIELD_API_SECRET` (+ `HIGGSFIELD_3D_ENDPOINT`), `REPLICATE_API_TOKEN` (+ `REPLICATE_3D_MODEL`) | 3D generation providers |
 | `SKETCHFAB_API_TOKEN`, `POLYPIZZA_API_KEY` | asset libraries (Poly Haven needs no key) |
 
-Keys can also be pasted into the console's Settings tab; they are stored in `<MAYA_APP_DIR>/automaya/prefs.json` with 0600 permissions and never sent anywhere except the provider they belong to.
+Keys can also be pasted into the Settings dialog (gear button in the console header, AI 3D APIs page, each provider has a Test button); they are stored in `<MAYA_APP_DIR>/automaya/prefs.json` with 0600 permissions and never sent anywhere except the provider they belong to.
 
 ## Tool families
 
-core, scene, modeling, materials, rigging_animation, previs, sim_vfx, arnold, assets, generation, intelligence, livelink, introspect. The full list with parameters is in [docs/TOOLS.md](docs/TOOLS.md). Three prompts ship with the server: `asset_creation_strategy`, `previs_shot_workflow`, `unreal_realtime_viewport`.
+core, scene, modeling, materials, rigging_animation, previs, sim_vfx, arnold, assets, generation, intelligence, livelink, introspect, plus the Craft layer: craft_procgen (parametric buildings, streets, rooms, furniture, terrain, scatter at real scale), craft_light (solar position, HDRI, three point and studio rigs, practicals in lumens and Kelvin, exposure in EV), craft_lookdev (measured PBR library, wear, variation, ACES, render presets), craft_critique (render analysis and reference comparison with concrete fixes), craft_photo (camera match, photo to block, depth relief), craft_plan (scene plan, quality gate). See [docs/CRAFT.md](docs/CRAFT.md). The full list with parameters is in [docs/TOOLS.md](docs/TOOLS.md). Prompts shipped with the server: `asset_creation_strategy`, `previs_shot_workflow`, `unreal_realtime_viewport`, `astra_loop`, `lighting_science`, `photo_to_scene`.
 
 ## Real time viewport in Unreal
 
@@ -76,7 +77,7 @@ The schema, coordinate conversion, and the outline for turning the subscriber in
 ## Development
 
 ```bash
-python3 -m pytest -q             # 323 tests: protocol, registry, every domain over a real socket against a maya stub
+python3 -m pytest -q             # 468 tests: protocol, registry, every domain over a real socket against a maya stub
 ruff check src maya_plugin tests unreal
 mayapy tests/maya_integration/run_in_mayapy.py   # integration pattern inside a real Maya
 python3 scripts/gen_tool_catalogue.py            # refresh docs/TOOLS.md

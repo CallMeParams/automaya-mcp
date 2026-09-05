@@ -72,7 +72,7 @@ def create_app(bridge: MayaConnection | None = None, modules: list | None = None
             "Prefer typed tools over maya_execute_python; use maya_viewport_screenshot and "
             "maya_scene_summary to verify results; call maya_drain_changes to learn what the user "
             "edited by hand. For assets: free libraries first (Poly Haven, Sketchfab, Poly Pizza), "
-            "AI generation (Tripo, Meshy, Rodin, Hunyuan, Higgsfield) for one hero object at a time."
+            "AI generation (Tripo, Meshy, Rodin, Hunyuan, Higgsfield, Replicate) for one hero object at a time."
         ),
         lifespan=lifespan,
     )

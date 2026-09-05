@@ -7,6 +7,7 @@ from .base import Provider3D, ProviderError
 from .higgsfield import HiggsfieldProvider
 from .hunyuan import HunyuanProvider
 from .meshy import MeshyProvider
+from .replicate import ReplicateProvider
 from .rodin import RodinProvider
 from .tripo import TripoProvider
 
@@ -16,6 +17,7 @@ PROVIDERS: Dict[str, Type[Provider3D]] = {
     "rodin": RodinProvider,
     "hunyuan": HunyuanProvider,
     "higgsfield": HiggsfieldProvider,
+    "replicate": ReplicateProvider,
 }
 
 _INSTANCES: Dict[str, Provider3D] = {}
