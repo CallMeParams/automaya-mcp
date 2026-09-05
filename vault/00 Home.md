@@ -18,6 +18,7 @@ Knowledge base for the AutoMaya MCP project: an MCP server plus in-Maya bridge t
 - [[Testing]] how the stub, fake bridge and mayapy runner work
 - [[Agent Playbook]] how Claude should behave when using these tools
 - [[Roadmap]] what is next
+- [[Verify In Maya]] items to confirm on a live Maya 2024
 
 ## Quick facts
 - Repo: `automaya-mcp`, package `automaya_mcp` (server) and `automaya_bridge` (plugin)
