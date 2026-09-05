@@ -36,6 +36,12 @@ TOOL_MODULES = [
     "intelligence",
     "livelink",
     "introspect",
+    "craft_procgen",
+    "craft_light",
+    "craft_lookdev",
+    "craft_critique",
+    "craft_photo",
+    "craft_plan",
 ]
 
 log = logging.getLogger("automaya")

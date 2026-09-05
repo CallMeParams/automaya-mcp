@@ -24,6 +24,10 @@ MODULES = [
     "intelligence",
     "livelink",
     "introspect",
+    "procgen",
+    "light",
+    "lookdev",
+    "photo",
 ]
 
 _loaded = False
