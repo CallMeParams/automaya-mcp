@@ -40,12 +40,13 @@ _FLAG_RE = re.compile(r"^\s*-(\w+)\s+-(\w+)\s*(.*?)\s*$")
 
 # commands ------------------------------------------------------------------
 def _all_command_names() -> List[str]:
-    """Every cmds function name; cmds.help('*') first, dir(cmds) as fallback."""
+    """Every cmds function name; cmds.help('.*', list=True) first, dir(cmds) as fallback."""
     if _COMMAND_CACHE:
         return _COMMAND_CACHE
     names: List[str] = []
     try:
-        names = _parse_help_list(cmds.help("*"))
+        # help takes a regular expression and only returns the matching names with -list.
+        names = _parse_help_list(cmds.help(".*", list=True))
     except Exception:
         names = []
     if not names:
@@ -78,9 +79,10 @@ def list_commands(prefix: str = "", limit: int = 200, offset: int = 0, contains:
     names = _all_command_names()
     if prefix:
         try:
-            matched = _parse_help_list(cmds.help(prefix + "*"))
+            matched = _parse_help_list(cmds.help("^" + re.escape(prefix) + ".*", list=True))
         except Exception:
             matched = []
+        matched = [n for n in matched if n.startswith(prefix)]
         names = sorted(set(matched)) if matched else [n for n in names if n.startswith(prefix)]
     if contains:
         low = contains.lower()

@@ -101,7 +101,12 @@ class MayaConnection:
             except TimeoutError:
                 self._close_locked()
                 raise MayaError("Maya did not answer %s within %.0fs. Maya may be busy (render, simulation, modal dialog)." % (command, timeout))
-            except (OSError, protocol.ProtocolError) as exc:
+            except protocol.ProtocolError as exc:
+                # Maya answered but the frame was unusable. Do not resend: the
+                # command already ran, and a mutating one must not run twice.
+                self._close_locked()
+                raise MayaError("Bad frame from Maya for %s: %s" % (command, exc))
+            except OSError as exc:
                 self._close_locked()
                 # one retry after reconnect covers Maya restarts between calls
                 if self._connect_locked():

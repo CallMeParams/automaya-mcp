@@ -424,7 +424,7 @@ def _set_one(node: str, attr: str, value: Any) -> Any:
     elif isinstance(value, (list, tuple)):
         values = list(value)
         if attr_type == "matrix":
-            cmds.setAttr(plug, values, type="matrix")
+            cmds.setAttr(plug, *values, type="matrix")
         elif attr_type in ("doubleArray", "floatArray", "Int32Array", "stringArray", "pointArray", "vectorArray"):
             cmds.setAttr(plug, len(values), *values, type=attr_type)
         elif attr_type:

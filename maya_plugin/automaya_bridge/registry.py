@@ -69,27 +69,48 @@ def _describe_signature(func: Callable[..., Any]) -> Dict[str, str]:
     return out
 
 
+_CHUNK_COUNTER = 0
+
+
 class UndoChunk:
-    """Context manager that opens a named undo chunk and undoes on error."""
+    """Context manager that opens a named undo chunk and undoes on error.
+
+    Maya drops empty chunks from the undo queue, so a handler that fails before
+    touching the scene must not trigger ``cmds.undo()`` (that would revert the
+    user's previous edit instead). Each chunk gets a unique name and the undo
+    only runs when that name is what sits on top of the queue after closing.
+    """
 
     def __init__(self, name: str) -> None:
+        global _CHUNK_COUNTER
+        _CHUNK_COUNTER += 1
         self.name = name
+        self.chunk_name = "AutoMaya:%s (%d)" % (name, _CHUNK_COUNTER)
 
     def __enter__(self) -> UndoChunk:
         if cmds is not None:
-            cmds.undoInfo(openChunk=True, chunkName="AutoMaya:%s" % self.name)
+            cmds.undoInfo(openChunk=True, chunkName=self.chunk_name)
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         if cmds is None:
             return False
         cmds.undoInfo(closeChunk=True)
-        if exc_type is not None:
+        if exc_type is not None and self._chunk_is_on_queue():
             try:
                 cmds.undo()
             except Exception:  # undo can legitimately fail on empty chunks
                 pass
         return False
+
+    def _chunk_is_on_queue(self) -> bool:
+        try:
+            top = cmds.undoInfo(query=True, undoName=True)
+        except Exception:
+            return True  # cannot tell, keep the old rollback behaviour
+        if top is None:
+            return True  # stub or very old Maya, same fallback
+        return str(top) == self.chunk_name
 
 
 def invoke(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -104,22 +125,27 @@ def invoke(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
             "unknown command %r. Call core.list_commands to see what this plugin build supports." % name,
             code="unknown_command",
         )
+    params = params or {}
+    # Check the kwargs against the signature up front so a TypeError raised
+    # inside the handler is reported as a real failure, not as bad params.
     try:
-        if spec.mutates:
-            with UndoChunk(name):
-                result = spec.func(**(params or {}))
-        else:
-            result = spec.func(**(params or {}))
-        return protocol.make_success(None, result, (time.perf_counter() - start) * 1000.0)
+        inspect.signature(spec.func).bind(**params)
     except TypeError as exc:
-        # Most TypeErrors here are bad kwargs; tell the caller what is accepted.
         return protocol.make_error(
             None,
             "%s. Accepted params for %s: %s" % (exc, name, ", ".join(spec.signature) or "none"),
-            traceback.format_exc(),
             code="bad_params",
             elapsed_ms=(time.perf_counter() - start) * 1000.0,
         )
+    except ValueError:
+        pass  # no introspectable signature, let the call itself decide
+    try:
+        if spec.mutates:
+            with UndoChunk(name):
+                result = spec.func(**params)
+        else:
+            result = spec.func(**params)
+        return protocol.make_success(None, result, (time.perf_counter() - start) * 1000.0)
     except Exception as exc:  # noqa: BLE001, we must report every failure
         return protocol.make_error(
             None,

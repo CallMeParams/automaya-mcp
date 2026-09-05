@@ -73,9 +73,14 @@ def load() -> Dict[str, Any]:
 
 
 def save(data: Dict[str, Any]) -> None:
+    """Write the prefs file owner-only from the first byte (it holds API keys),
+    via a temp file so a crash mid write cannot leave a truncated file behind."""
     path = prefs_path()
-    with open(path, "w", encoding="utf-8") as fh:
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
+    os.replace(tmp, path)
     try:
         os.chmod(path, 0o600)
     except OSError:

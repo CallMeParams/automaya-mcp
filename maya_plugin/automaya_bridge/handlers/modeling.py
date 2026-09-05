@@ -103,6 +103,17 @@ def _created(result: Any, translate: Any = None, rotate: Any = None, scale: Any 
     }
 
 
+def _selected_primitive(name: str | None) -> List[str]:
+    """Result list for primitive commands that return nothing but leave the new transform selected."""
+    sel = cmds.ls(selection=True, long=True) or []
+    if not sel:
+        raise BridgeError("Maya did not return a node")
+    transform = sel[0]
+    if name:
+        transform = cmds.rename(transform, name) or transform
+    return [transform]
+
+
 def _mesh_result(node: str, history: Any, extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
     transform = _long(_util.transform_of(node))
     out: Dict[str, Any] = {"node": transform, "history": [h for h in (history or []) if h], "node_summary": node_summary(transform)}
@@ -160,8 +171,10 @@ def create_primitive(
         thickness = float(width) if width is not None else r * 0.5
         result = cmds.polyPipe(radius=r, height=h, thickness=thickness, subdivisionsAxis=sub or 20, subdivisionsHeight=1, subdivisionsCaps=1, **kw)
     elif kind == "disc":
-        # polyDisc: -sides is the polygon side count, -subdivisions the ring count, -radius the size.
-        result = cmds.polyDisc(sides=sub or 8, subdivisions=1, radius=r, **kw)
+        # polyDisc (2019+ primitive plugin): -sides, -subdivisionMode, -subdivisions, -radius. It does not
+        # take -name/-ch and returns nothing; the new transform is left selected, so read it from the selection.
+        cmds.polyDisc(sides=sub or 8, subdivisions=1, radius=r)
+        result = _selected_primitive(name)
     elif kind == "prism":
         # polyPrism: -length is the height along Y, -sideLength the edge length, -numberOfSides the side count.
         result = cmds.polyPrism(length=h, sideLength=w, numberOfSides=sub or 3, subdivisionsHeight=1, subdivisionsCaps=0, **kw)
@@ -172,8 +185,10 @@ def create_primitive(
         tube = float(width) if width is not None else r * 0.2
         result = cmds.polyHelix(coils=3, height=h, width=r, radius=tube, subdivisionsAxis=8, subdivisionsCoil=sub or 50, subdivisionsCaps=0, **kw)
     else:  # platonic
-        # polyPlatonic -solidType: 0 dodecahedron, 1 icosahedron, 2 octahedron, 3 tetrahedron (Maya 2024 docs).
-        result = cmds.polyPlatonic(solidType=sub if sub is not None else 1, radius=r, **kw)
+        # polyPlatonic (2019+ primitive plugin): -primitive 0 tetrahedron, 1 cube, 2 octahedron, 3 dodecahedron,
+        # 4 icosahedron, plus -subdivisions and -radius. Like polyDisc it returns nothing and selects the result.
+        cmds.polyPlatonic(primitive=sub if sub is not None else 4, subdivisions=0, radius=r)
+        result = _selected_primitive(name)
     out = _created(result, translate, rotate, scale)
     out["kind"] = kind
     return out
@@ -665,7 +680,7 @@ def cleanup(
     cmds.select(targets, replace=True)
     # polyCleanupArgList version 4 (Maya 2019+): allMeshes, selectOnly, historyOn, quads, nsided,
     # concave, holed, nonplanar, zeroGeom, zeroGeomTol, zeroEdge, zeroEdgeTol, zeroMap, zeroMapTol,
-    # sharedUVs, nonmanifold (0 off, 1 normals+geometry, 2 geometry), lamina, invalidComponents.
+    # sharedUVs, nonmanifold (-1 off, 1 normals+geometry, 2 geometry), lamina, invalidComponents.
     args = [
         "0",
         "1" if select_only else "0",
@@ -682,7 +697,7 @@ def cleanup(
         "0",
         "1e-05",
         "0",
-        "1" if nonmanifold else "0",
+        "1" if nonmanifold else "-1",
         "1" if lamina else "0",
         "0",
     ]

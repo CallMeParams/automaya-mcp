@@ -86,7 +86,13 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(name="maya_execute_mel", annotations={"title": "Run MEL in Maya", **DESTRUCTIVE})
     async def maya_execute_mel(params: ExecuteMelInput) -> str:
         """Execute a MEL snippet. Handy for commands that only exist in MEL
-        (FBXExport options, some UI and render globals helpers)."""
+        (FBXExport options, some UI and render globals helpers). Safe mode
+        blocks MEL that reaches the shell, files or Python (system, sysFile,
+        python, eval, source ...)."""
+        if safety.safe_mode_enabled():
+            problems = safety.validate_mel(params.code)
+            if problems:
+                return "Error: rejected by safe mode:\n- " + "\n- ".join(problems)
         return await ctx.run("core.execute_mel", {"code": params.code})
 
     @mcp.tool(name="maya_get_console_log", annotations={"title": "Read the AutoMaya console log", **READ})

@@ -37,11 +37,14 @@ def _isolated_index(tmp_path, monkeypatch):
 
 def _help(fake_maya):
     def help_(pattern=None, **kw):
-        if pattern == "*":
-            return "polyCube\npolySphere\npolyExtrudeFacet\nls\nxform\n"
-        if pattern and pattern.endswith("*"):
-            prefix = pattern[:-1]
-            return "\n".join(c for c in ("polyCube", "polySphere", "polyExtrudeFacet", "ls", "xform") if c.startswith(prefix))
+        # Real Maya: help takes a regex and only returns the matching names with list=True.
+        if kw.get("list"):
+            if pattern == ".*":
+                return ["polyCube", "polySphere", "polyExtrudeFacet", "ls", "xform"]
+            if pattern and pattern.startswith("^") and pattern.endswith(".*"):
+                prefix = pattern[1:-2].replace("\\", "")
+                return [c for c in ("polyCube", "polySphere", "polyExtrudeFacet", "ls", "xform") if c.startswith(prefix)]
+            return []
         if pattern == "polyCube":
             return POLYCUBE_HELP
         if pattern == "polySphere":

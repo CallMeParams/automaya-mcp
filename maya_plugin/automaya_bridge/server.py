@@ -30,6 +30,8 @@ except ImportError:  # pragma: no cover
 
 PLUGIN_VERSION = "1.0.0"
 LOG_CAPACITY = 2000
+MAX_CLIENTS = 16  # one thread per client; anything beyond this is refused
+BODY_TIMEOUT = 30.0  # seconds a client gets to deliver a frame body after its header
 
 LogListener = Callable[[Dict[str, Any]], None]
 
@@ -72,13 +74,22 @@ class RingLog:
 LOG = RingLog()
 
 
+_BATCH_MODE: bool | None = None  # cached on the main thread by BridgeServer.start()
+
+
 def _in_batch_mode() -> bool:
-    if cmds is None:
-        return True
-    try:
-        return bool(cmds.about(batch=True))
-    except Exception:
-        return True
+    """Whether this session has no UI event loop. Cached because it is asked on
+    the socket threads, where calling ``cmds`` is not allowed."""
+    global _BATCH_MODE
+    if _BATCH_MODE is None:
+        if cmds is None:
+            _BATCH_MODE = True
+        else:
+            try:
+                _BATCH_MODE = bool(cmds.about(batch=True))
+            except Exception:
+                _BATCH_MODE = True
+    return _BATCH_MODE
 
 
 def run_on_main_thread(func: Callable[[], Any]) -> Any:
@@ -106,6 +117,7 @@ class BridgeServer:
             return
         if self.host not in ("127.0.0.1", "localhost", "::1"):
             LOG.add("warn", "binding to a non loopback host exposes Maya to the network")
+        _in_batch_mode()  # prime the cache here, on the main thread
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((self.host, self.port))
@@ -155,7 +167,23 @@ class BridgeServer:
                 break
             client.settimeout(None)
             with self._clients_lock:
-                self._clients.append(client)
+                if len(self._clients) >= MAX_CLIENTS:
+                    full = True
+                else:
+                    full = False
+                    self._clients.append(client)
+            if full:
+                LOG.add("warn", "refused client %s:%d, %d clients already connected" % (addr[0], addr[1], MAX_CLIENTS))
+                try:
+                    client.settimeout(2.0)
+                    protocol.write_frame(client, protocol.make_error(None, "too many clients connected to this bridge", code="busy"))
+                except OSError:
+                    pass
+                try:
+                    client.close()
+                except OSError:
+                    pass
+                continue
             self.stats["clients_total"] += 1
             LOG.add("info", "client connected from %s:%d" % addr)
             t = threading.Thread(target=self._client_loop, args=(client, addr), daemon=True)
@@ -165,17 +193,30 @@ class BridgeServer:
         try:
             while self.running:
                 try:
-                    request = protocol.read_frame(client)
-                except (ConnectionError, protocol.ProtocolError) as exc:
+                    request = protocol.read_frame(client, body_timeout=BODY_TIMEOUT)
+                except (OSError, protocol.ProtocolError) as exc:
                     if isinstance(exc, protocol.ProtocolError):
                         try:
                             protocol.write_frame(client, protocol.make_error(None, str(exc), code="protocol"))
                         except OSError:
                             pass
                     break
+                if not isinstance(request, dict):
+                    try:
+                        protocol.write_frame(client, protocol.make_error(None, "request must be a JSON object", code="protocol"))
+                    except OSError:
+                        pass
+                    break
                 response = self.dispatch(request)
                 try:
                     protocol.write_frame(client, response)
+                except protocol.ProtocolError as exc:
+                    # The result is too big for one frame. Keep the connection: dropping it
+                    # would make the client reconnect and run the same command again.
+                    try:
+                        protocol.write_frame(client, protocol.make_error(request.get("id"), "%s. Narrow the query or paginate." % exc, code="too_large"))
+                    except OSError:
+                        break
                 except OSError:
                     break
         finally:

@@ -77,12 +77,26 @@ def _recv_exact(sock: socket.socket, n: int) -> bytes:
     return b"".join(chunks)
 
 
-def read_frame(sock: socket.socket) -> Dict[str, Any]:
+def read_frame(sock: socket.socket, body_timeout: float | None = None) -> Dict[str, Any]:
+    """Read one frame. ``body_timeout`` bounds the wait for the payload once the
+    header has arrived (a server uses it so a peer that announces a large frame
+    and then stalls cannot pin a thread and its buffer forever); the socket's
+    own timeout is restored afterwards."""
     header = _recv_exact(sock, HEADER.size)
     (length,) = HEADER.unpack(header)
     if length > MAX_FRAME_BYTES:
         raise ProtocolError("incoming frame of %d bytes exceeds MAX_FRAME_BYTES" % length)
-    payload = _recv_exact(sock, length)
+    if body_timeout is None:
+        payload = _recv_exact(sock, length)
+    else:
+        previous = sock.gettimeout()
+        sock.settimeout(body_timeout)
+        try:
+            payload = _recv_exact(sock, length)
+        except TimeoutError:
+            raise ProtocolError("timed out after %.0fs waiting for a %d byte frame body" % (body_timeout, length))
+        finally:
+            sock.settimeout(previous)
     try:
         return json.loads(payload.decode("utf-8"))
     except ValueError as exc:

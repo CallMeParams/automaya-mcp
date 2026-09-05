@@ -543,7 +543,7 @@ def create_instancer(source_nodes: Sequence[str], particle: str, name: str = "in
         pshape = _shape_or_self(particle, "particle")
     kwargs: Dict[str, Any] = {"addObject": True, "object": list(source_nodes), "name": name}
     if cycle:
-        kwargs["cycle"] = "sequential"
+        kwargs["cycle"] = "sequential"  # particleInstancer -cycle accepts "none" or "sequential"
     try:
         inst = cmds.particleInstancer(pshape, **kwargs)
     except Exception as exc:

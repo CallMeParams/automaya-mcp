@@ -41,6 +41,15 @@ TEXTURE_MAP_ALIASES = {
 }
 
 
+def _inside(folder: str, rel: str) -> str | None:
+    """Join ``rel`` (a path the remote API chose) under ``folder``; None when it escapes."""
+    root = os.path.realpath(folder)
+    dest = os.path.realpath(os.path.join(root, rel.lstrip("/")))
+    if dest == root or not dest.startswith(root + os.sep):
+        return None
+    return dest
+
+
 # Poly Haven ---------------------------------------------------------------
 class PolyHaven:
     name = "polyhaven"
@@ -134,7 +143,7 @@ class PolyHaven:
             fmt = "hdr" if "hdr" in variants else next(iter(variants))
         url = variants[fmt]["url"]
         folder = folder or os.path.join(download_dir(), "polyhaven", safe_name(asset_id))
-        path = await download_url(url, os.path.join(folder, "%s_%s.%s" % (asset_id, res, fmt)))
+        path = await download_url(url, os.path.join(folder, "%s_%s.%s" % (safe_name(asset_id), res, safe_name(fmt))))
         return {"asset_id": asset_id, "type": "hdris", "resolution": res, "format": fmt, "path": path, "url": url}
 
     async def download_texture_set(self, asset_id: str, resolution: str | None = "2k", fmt: str = "jpg", folder: str | None = None, maps: List[str] | None = None) -> Dict[str, Any]:
@@ -162,7 +171,7 @@ class PolyHaven:
                 # Displacement and normal maps look bad as jpg; fall back to whatever exists.
                 f = "png" if "png" in variants else ("exr" if "exr" in variants else next(iter(variants)))
             url = variants[f]["url"]
-            path = await download_url(url, os.path.join(folder, "%s_%s_%s.%s" % (asset_id, alias, res, f)))
+            path = await download_url(url, os.path.join(folder, "%s_%s_%s.%s" % (safe_name(asset_id), safe_name(alias), res, safe_name(f))))
             result[alias] = path
             res_used = res
         if not result:
@@ -181,13 +190,15 @@ class PolyHaven:
         folder = folder or os.path.join(download_dir(), "polyhaven", safe_name(asset_id))
         main_url = variant["url"]
         ext = os.path.splitext(main_url.split("?")[0])[1] or "." + fmt
-        main_path = await download_url(main_url, os.path.join(folder, "%s_%s%s" % (asset_id, res, ext)))
+        main_path = await download_url(main_url, os.path.join(folder, "%s_%s%s" % (safe_name(asset_id), res, safe_name(ext))))
         textures: List[str] = []
         for rel, info in (variant.get("include") or {}).items():
             url = info.get("url") if isinstance(info, dict) else None
             if not url:
                 continue
-            dest = os.path.join(folder, rel.replace("\\", "/"))
+            dest = _inside(folder, rel.replace("\\", "/"))
+            if dest is None:
+                continue  # the API named a path outside the asset folder, never write there
             await download_url(url, dest)
             textures.append(dest)
         if ext == ".zip":
@@ -292,7 +303,7 @@ class Sketchfab:
         folder = folder or os.path.join(download_dir(), "sketchfab", safe_name(uid))
         url = entry["url"]
         ext = ".zip" if fmt in ("gltf", "source") else "." + fmt
-        archive = await download_url(url, os.path.join(folder, "%s_%s%s" % (uid, fmt, ext)))
+        archive = await download_url(url, os.path.join(folder, "%s_%s%s" % (safe_name(uid), safe_name(fmt), ext)))
         result: Dict[str, Any] = {"uid": uid, "format": fmt, "path": archive, "folder": folder, "size": entry.get("size")}
         if ext == ".zip" or zipfile.is_zipfile(archive):
             with zipfile.ZipFile(archive) as zf:

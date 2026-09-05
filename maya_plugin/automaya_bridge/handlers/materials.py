@@ -286,8 +286,12 @@ def set_texture(material: str, attribute: str, path: str, color_space: str | Non
         cmds.setAttr(file_node + ".alphaIsLuminance", 0)
         bump_node = cmds.shadingNode("bump2d", asUtility=True, name=file_node.replace("_file", "") + "_bump2d")
         cmds.setAttr(bump_node + ".bumpInterp", 1)  # tangent space normals
-        cmds.setAttr(bump_node + ".aiFlipR", 0)
-        cmds.setAttr(bump_node + ".aiFlipG", 0)
+        # aiFlipR/aiFlipG only exist when mtoa is loaded.
+        for flip in ("aiFlipR", "aiFlipG"):
+            try:
+                cmds.setAttr("%s.%s" % (bump_node, flip), 0)
+            except Exception:
+                pass
         cmds.connectAttr(file_node + ".outAlpha", bump_node + ".bumpValue", force=True)
         cmds.connectAttr(bump_node + ".outNormal", "%s.%s" % (material, attr), force=True)
     elif kind == "scalar":

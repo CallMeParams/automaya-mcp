@@ -73,21 +73,29 @@ def test_create_cube_flags_and_placement(fake_maya):
         ("plane", "polyPlane", {"width": 1.0, "height": 5.0, "subdivisionsX": 12}),
         ("torus", "polyTorus", {"radius": 2.0, "sectionRadius": 1.0}),
         ("pipe", "polyPipe", {"radius": 2.0, "height": 5.0, "thickness": 1.0}),
-        ("disc", "polyDisc", {"sides": 12, "radius": 2.0}),
+        ("disc", "polyDisc", {"sides": 12, "radius": 2.0}),  # plugin primitive: no name/ch flags, returns nothing
         ("prism", "polyPrism", {"length": 5.0, "numberOfSides": 12}),
         ("pyramid", "polyPyramid", {"numberOfSides": 12}),
         ("helix", "polyHelix", {"width": 2.0, "height": 5.0}),
-        ("platonic", "polyPlatonic", {"solidType": 12, "radius": 2.0}),
+        ("platonic", "polyPlatonic", {"primitive": 12, "radius": 2.0}),
     ],
 )
 def test_create_primitive_kinds(fake_maya, kind, cmd, expect):
-    fake_maya.responses[cmd] = ["node1", cmd + "1"]
-    _mesh(fake_maya, ("node1",))
+    selection_only = cmd in ("polyDisc", "polyPlatonic")
+    if selection_only:
+        # Real Maya: polyDisc/polyPlatonic return None and leave the new transform selected.
+        fake_maya.responses[cmd] = None
+        _mesh(fake_maya, ("node1",), selection=["|node1"])
+    else:
+        fake_maya.responses[cmd] = ["node1", cmd + "1"]
+        _mesh(fake_maya, ("node1",))
     out = modeling.create_primitive(kind, radius=2, height=5, subdivisions=12)
     assert out["kind"] == kind and out["transform"] == "|node1"
     (_, kw), = fake_maya.calls_to(cmd)
     for key, value in expect.items():
         assert kw[key] == value, (kind, key, kw)
+    if selection_only:
+        assert "name" not in kw and "constructionHistory" not in kw
 
 
 def test_create_primitive_size_fallback_and_bad_kind(fake_maya):

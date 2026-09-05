@@ -255,7 +255,7 @@ if HAVE_QT:
             from .handlers import core as core_handlers
 
             server.LOG.add("repl", code.strip().splitlines()[0][:120] + (" ..." if "\n" in code.strip() else ""))
-            result = core_handlers.execute_python(code=code, allow_unsafe=True)
+            result = core_handlers.run_python(code, allow_unsafe=True)
             out = result.get("stdout") or ""
             if result.get("result") is not None:
                 out += ("\n" if out else "") + repr(result["result"])

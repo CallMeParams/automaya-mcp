@@ -561,10 +561,19 @@ class Subscriber:
         self.markers: List[Dict[str, Any]] = []
         self.auto_usd = True
         self.log_events = False
+        # Compound transform events carry no value, so the real numbers are pulled over
+        # the command port. That call goes through this queue to a worker thread: a
+        # socket round trip to Maya must never run on the game thread (Maya may be busy
+        # for minutes, which would freeze the editor).
+        self._refresh_queue: queue.Queue = queue.Queue()
+        self._refresh_thread: threading.Thread | None = None
 
     def start(self) -> Subscriber:
         if not self.listener.is_alive():
             self.listener.start()
+        if self._refresh_thread is None or not self._refresh_thread.is_alive():
+            self._refresh_thread = threading.Thread(target=self._refresh_loop, name="AutoMayaRefresh", daemon=True)
+            self._refresh_thread.start()
         if unreal is not None and self.tick_handle is None:
             self.tick_handle = unreal.register_slate_post_tick_callback(self._tick)
         _log("AutoMaya subscriber started (events %d, commands %d)" % (self.listener.port, self.bridge.port))
@@ -572,6 +581,7 @@ class Subscriber:
 
     def stop(self) -> None:
         self.listener.stop()
+        self._refresh_queue.put(None)
         if unreal is not None and self.tick_handle is not None:
             unreal.unregister_slate_post_tick_callback(self.tick_handle)
             self.tick_handle = None
@@ -601,6 +611,31 @@ class Subscriber:
             "queued": self.queue.qsize(), "nodes": len(self.scene.nodes), "actors": len(self.scene.actors), "hello": self.listener.hello,
             "last_frame": self.last_frame, "markers": self.markers[-5:],
         }
+
+    # worker thread
+    def _refresh_loop(self) -> None:
+        while True:
+            node = self._refresh_queue.get()
+            if node is None:
+                return
+            nodes = [node]
+            while True:  # coalesce whatever else piled up into one round trip
+                try:
+                    more = self._refresh_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if more is None:
+                    return
+                if more not in nodes:
+                    nodes.append(more)
+            try:
+                rows = self.bridge.call("livelink.get_transforms", {"nodes": nodes})["transforms"]
+            except Exception as exc:  # Maya busy or gone; the next attr event retries
+                self.dropped += len(nodes)
+                if self.log_events:
+                    _log("AutoMaya refresh failed for %s: %s" % (nodes, exc))
+                continue
+            self.queue.put({"kind": "transforms", "rows": rows})
 
     # game thread
     def _tick(self, _delta: float) -> None:
@@ -635,15 +670,12 @@ class Subscriber:
             if self.scene.apply_attr_event(event):
                 self.applied += 1
             elif event.get("value") is None and event.get("attr", "").split(".")[0] in ("translate", "rotate", "scale"):
-                # compound plug set (e.g. from xform): pull the real values
-                node = event.get("node")
-                try:
-                    self.refresh_transforms([node])
-                    self.applied += 1
-                except Exception:
-                    self.dropped += 1
+                # compound plug set (e.g. from xform): pull the real values off the game thread
+                self._refresh_queue.put(event.get("node"))
             else:
                 self.dropped += 1
+        elif kind == "transforms":
+            self.applied += self.scene.apply_transforms(event.get("rows") or [])
         elif kind == "node_removed":
             self.scene.remove(event.get("node", ""))
         elif kind == "node_added":

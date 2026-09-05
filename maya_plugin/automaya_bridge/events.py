@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import collections
 import json
+import queue
 import socket
 import threading
 import time
@@ -296,8 +297,17 @@ def _scene_name() -> str:
         return ""
 
 
+SEND_TIMEOUT = 2.0  # a subscriber that cannot take a line within this is dropped
+OUTBOX_CAPACITY = 20000  # lines buffered for the writer thread before events are dropped
+
+
 class Broadcaster:
-    """Fan-out NDJSON stream of events to any TCP subscriber."""
+    """Fan-out NDJSON stream of events to any TCP subscriber.
+
+    ``publish`` is called from OpenMaya callbacks on Maya's main thread, so it
+    only queues the line; a writer thread does the socket sends. A stalled
+    subscriber therefore never blocks Maya, it just gets disconnected.
+    """
 
     def __init__(self, host: str = "127.0.0.1", port: int = 9878) -> None:
         self.host = host
@@ -307,7 +317,10 @@ class Broadcaster:
         self._subs: List[socket.socket] = []
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        self._writer: threading.Thread | None = None
+        self._outbox: queue.Queue = queue.Queue(maxsize=OUTBOX_CAPACITY)
         self.sent = 0
+        self.dropped = 0
         self.started_at: float | None = None
         self.clients_total = 0
         self.scene_info: Dict[str, Any] = {}
@@ -336,9 +349,15 @@ class Broadcaster:
         self.started_at = time.time()
         self._thread = threading.Thread(target=self._accept, name="AutoMayaEvents", daemon=True)
         self._thread.start()
+        self._writer = threading.Thread(target=self._write_loop, name="AutoMayaEventsWriter", daemon=True)
+        self._writer.start()
 
     def stop(self) -> None:
         self.running = False
+        try:
+            self._outbox.put_nowait(None)  # wake the writer so it can exit
+        except queue.Full:
+            pass
         with self._lock:
             subs = list(self._subs)
             self._subs.clear()
@@ -367,14 +386,18 @@ class Broadcaster:
                 continue
             except OSError:
                 break
-            c.setblocking(True)
-            with self._lock:
-                self._subs.append(c)
-                self.clients_total += 1
+            c.settimeout(SEND_TIMEOUT)
             try:
                 c.sendall((json.dumps(self.hello()) + "\n").encode("utf-8"))
             except OSError:
-                pass
+                try:
+                    c.close()
+                except OSError:
+                    pass
+                continue
+            with self._lock:
+                self._subs.append(c)
+                self.clients_total += 1
 
     def hello(self) -> Dict[str, Any]:
         """First line every subscriber receives. Carries what a receiver needs to
@@ -385,23 +408,46 @@ class Broadcaster:
         return info
 
     def publish(self, event: Dict[str, Any]) -> None:
+        """Queue one event line. Never blocks: called from Maya's main thread."""
         if not self.running:
             return
         line = (json.dumps(event, default=str) + "\n").encode("utf-8")
+        try:
+            self._outbox.put_nowait(line)
+        except queue.Full:
+            self.dropped += 1
+
+    def _write_loop(self) -> None:
+        while self.running:
+            try:
+                line = self._outbox.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if line is None:
+                break
+            self._send_to_all(line)
+
+    def _send_to_all(self, line: bytes) -> None:
         dead = []
         with self._lock:
             subs = list(self._subs)
         for c in subs:
+            self.sent += 1  # counted before the send so status is consistent with what a reader sees
             try:
                 c.sendall(line)
-                self.sent += 1
-            except OSError:
+            except OSError:  # includes the send timeout of a stalled subscriber
+                self.sent -= 1
                 dead.append(c)
         if dead:
             with self._lock:
                 for c in dead:
                     if c in self._subs:
                         self._subs.remove(c)
+            for c in dead:
+                try:
+                    c.close()
+                except OSError:
+                    pass
 
 
 BUS = EventBus()
