@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "automaya": { "command": "automaya-mcp", "env": { "AUTOMAYA_PORT": "9877" } }
+  }
+}

@@ -1,0 +1,43 @@
+<evaluation>
+  <!-- Build the scene with evals/build_eval_scene.py first. Every question is read only. -->
+  <qa_pair>
+    <question>How many polygon meshes are in the scene, counting every mesh shape under SET_street plus any others?</question>
+    <answer>9</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What is the height (Y size, in cm) of the tallest building under the SET_street group?</question>
+    <answer>1650</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which camera in the scene has a 35 mm lens, and what is its horizontal field of view in degrees rounded to the nearest whole number using the default 36 mm horizontal aperture?</question>
+    <answer>shotCam_010, 54</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Over the playback range, how far (in cm) does hero_ball travel along X between its first and last keyframes?</question>
+    <answer>1600</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What shader type is assigned to hero_ball and what is its base colour as R,G,B?</question>
+    <answer>standardSurface, 0.8,0.1,0.1</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which transform in the scene has non frozen, non uniform-to-one scale values (a candidate flagged by the problem finder), and what is its scale?</question>
+    <answer>crate_unfrozen, 2 2 2</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What are the playback start and end frames?</question>
+    <answer>1001, 1096</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many direct children does SET_street have?</question>
+    <answer>7</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What is the X position of the building named bldg_04?</question>
+    <answer>250</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Using the command help tool, which flag of polyCube sets its width (short flag name)?</question>
+    <answer>w</answer>
+  </qa_pair>
+</evaluation>

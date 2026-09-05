@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "automaya": {
+      "command": "automaya-mcp",
+      "args": [],
+      "env": {
+        "AUTOMAYA_PORT": "9877",
+        "AUTOMAYA_MODULES": "core,scene,modeling,materials,previs,rigging_animation,intelligence,assets,generation,livelink"
+      }
+    }
+  }
+}

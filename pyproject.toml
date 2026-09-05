@@ -26,6 +26,9 @@ automaya-mcp = "automaya_mcp.server:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/automaya_mcp"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"maya_plugin" = "automaya_mcp/maya_plugin"
+
 [tool.hatch.build.targets.sdist]
 include = ["src", "maya_plugin", "scripts", "docs", "README.md", "LICENSE"]
 

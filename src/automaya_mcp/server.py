@@ -5,12 +5,14 @@ Run ``automaya-mcp`` (stdio) or ``python -m automaya_mcp``. Environment:
   AUTOMAYA_HOST / AUTOMAYA_PORT   bridge address (default 127.0.0.1:9877)
   AUTOMAYA_TIMEOUT                default per command timeout in seconds
   AUTOMAYA_SAFE_MODE=1            reject shell/network/file access in python tools
+  AUTOMAYA_MODULES=core,scene,... load only these tool modules (smaller tool list)
   <PROVIDER>_API_KEY              see providers/ for the exact names
 """
 from __future__ import annotations
 
 import importlib
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict
@@ -69,7 +71,13 @@ def create_app(bridge: MayaConnection | None = None, modules: list | None = None
         lifespan=lifespan,
     )
 
-    for name in modules or TOOL_MODULES:
+    if modules is None:
+        env_modules = os.environ.get("AUTOMAYA_MODULES", "").strip()
+        modules = [m.strip() for m in env_modules.split(",") if m.strip()] if env_modules else TOOL_MODULES
+        unknown = [m for m in modules if m not in TOOL_MODULES]
+        if unknown:
+            raise SystemExit("AUTOMAYA_MODULES has unknown modules %s; valid: %s" % (unknown, ", ".join(TOOL_MODULES)))
+    for name in modules:
         module = importlib.import_module("automaya_mcp.tools.%s" % name)
         module.register(mcp, ctx)
 
