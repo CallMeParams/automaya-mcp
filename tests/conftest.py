@@ -13,12 +13,12 @@ import json
 import socket
 from typing import Any, Dict
 
-import pytest
-
 import maya  # noqa: F401, installs the stub into sys.modules
+import pytest
 from maya import cmds
 
-from automaya_bridge import handlers, server as plugin_server
+from automaya_bridge import handlers
+from automaya_bridge import server as plugin_server
 from automaya_mcp.connection import MayaConnection
 from automaya_mcp.server import create_app
 
@@ -60,7 +60,12 @@ def app(connection):
 @pytest.fixture()
 def call_tool(app):
     async def _call(name: str, arguments: Dict[str, Any] | None = None) -> str:
-        result = await app.call_tool(name, arguments or {})
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        try:
+            result = await app.call_tool(name, arguments or {})
+        except ToolError as exc:  # validation errors reach real clients as isError text
+            return "Error: %s" % exc
         # FastMCP returns (content_list, structured) or content list depending on version
         content = result[0] if isinstance(result, tuple) else result
         texts = []

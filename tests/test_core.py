@@ -5,11 +5,11 @@ import socket
 import threading
 
 import pytest
+from tests.conftest import parse
 
 from automaya_bridge import protocol, registry
 from automaya_mcp import safety
 from automaya_mcp.connection import MayaError, MayaUnavailable
-from tests.conftest import parse
 
 
 # unit: protocol framing ----------------------------------------------------

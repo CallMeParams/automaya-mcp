@@ -8,7 +8,7 @@ import os
 import platform
 import sys
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .. import events, prefs, protocol, registry, server
 from ..registry import command
@@ -121,7 +121,7 @@ def execute_python(code: str, allow_unsafe: bool = False, capture: bool = True) 
     ns = _exec_namespace()
     stdout = io.StringIO()
     result: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     try:
         tree = ast.parse(code, mode="exec")
         last_expr = None
@@ -150,12 +150,12 @@ def execute_mel(code: str) -> Dict[str, Any]:
 
 
 @command("core.get_log")
-def get_log(count: int = 100, level: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_log(count: int = 100, level: str | None = None) -> List[Dict[str, Any]]:
     return server.LOG.tail(int(count), level)
 
 
 @command("core.drain_changes")
-def drain_changes(since_seq: int = 0, limit: int = 500, kinds: Optional[List[str]] = None, human_only: bool = False, summary: bool = False) -> Dict[str, Any]:
+def drain_changes(since_seq: int = 0, limit: int = 500, kinds: List[str] | None = None, human_only: bool = False, summary: bool = False) -> Dict[str, Any]:
     """Return scene change events since ``since_seq``. Starts tracking if needed."""
     if not events.BUS.active:
         events.BUS.start()
@@ -165,7 +165,7 @@ def drain_changes(since_seq: int = 0, limit: int = 500, kinds: Optional[List[str
 
 
 @command("core.events_control", mutates=False)
-def events_control(action: str = "status", nodes: Optional[List[str]] = None, transform_only: Optional[bool] = None) -> Dict[str, Any]:
+def events_control(action: str = "status", nodes: List[str] | None = None, transform_only: bool | None = None) -> Dict[str, Any]:
     if action == "start":
         events.BUS.start()
     elif action == "stop":

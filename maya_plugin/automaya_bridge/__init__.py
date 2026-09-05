@@ -18,7 +18,7 @@ __version__ = server.PLUGIN_VERSION
 __all__ = ["start", "stop", "show_console", "install_menu", "__version__"]
 
 
-def start(port: int | None = None, events: bool | None = None) -> "server.BridgeServer":
+def start(port: int | None = None, events: bool | None = None) -> server.BridgeServer:
     p = prefs.load()
     srv = server.start(port=int(port or p.get("port", protocol.DEFAULT_PORT)))
     track = p.get("auto_events", True) if events is None else events

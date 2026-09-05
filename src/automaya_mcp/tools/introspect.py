@@ -1,5 +1,6 @@
 """introspect tools (placeholder, replaced by domain build)."""
 from mcp.server.fastmcp import FastMCP
+
 from ._base import ToolContext
 
 

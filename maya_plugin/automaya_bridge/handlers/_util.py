@@ -5,7 +5,7 @@ import base64
 import os
 import tempfile
 import urllib.request
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Sequence
 
 try:
     from maya import cmds, mel  # type: ignore
@@ -45,7 +45,7 @@ def require_nodes(nodes: Sequence[str]) -> List[str]:
     return list(nodes)
 
 
-def resolve_targets(nodes: Optional[Sequence[str]]) -> List[str]:
+def resolve_targets(nodes: Sequence[str] | None) -> List[str]:
     """Use explicit nodes, else the current selection, else raise."""
     if nodes:
         return require_nodes(nodes)
@@ -55,7 +55,7 @@ def resolve_targets(nodes: Optional[Sequence[str]]) -> List[str]:
     return sel
 
 
-def shapes_of(node: str, shape_type: Optional[str] = None) -> List[str]:
+def shapes_of(node: str, shape_type: str | None = None) -> List[str]:
     kwargs: Dict[str, Any] = {"shapes": True, "noIntermediate": True, "fullPath": True}
     if shape_type:
         kwargs["type"] = shape_type
@@ -87,12 +87,128 @@ def node_summary(node: str) -> Dict[str, Any]:
     return info
 
 
+def set_attr_value(node: str, attr: str, value: Any) -> None:
+    """setAttr with the type flags Maya wants for strings, bools, vectors and colors.
+
+    Raises BridgeError with the attribute name when Maya rejects the value, so the
+    agent learns which attribute was wrong instead of getting a bare RuntimeError.
+    """
+    plug = "%s.%s" % (node, attr)
+    try:
+        if isinstance(value, str):
+            cmds.setAttr(plug, value, type="string")
+        elif isinstance(value, bool):
+            cmds.setAttr(plug, 1 if value else 0)
+        elif isinstance(value, (list, tuple)):
+            vals = [float(v) for v in value]
+            if len(vals) == 3:
+                cmds.setAttr(plug, vals[0], vals[1], vals[2], type="double3")
+            elif len(vals) == 2:
+                cmds.setAttr(plug, vals[0], vals[1], type="double2")
+            elif len(vals) == 4:
+                cmds.setAttr(plug, vals[0], vals[1], vals[2], vals[3], type="double4")
+            else:
+                raise BridgeError("attribute %s: lists must have 2, 3 or 4 numbers, got %d" % (plug, len(vals)))
+        elif isinstance(value, dict):
+            raise BridgeError("attribute %s: dict values are not supported, pass a number, string, bool or list" % plug)
+        else:
+            cmds.setAttr(plug, value)
+    except BridgeError:
+        raise
+    except Exception as exc:
+        raise BridgeError("could not set %s to %r: %s" % (plug, value, exc))
+
+
+PLACE2D_LINKS = (
+    "coverage", "translateFrame", "rotateFrame", "mirrorU", "mirrorV", "stagger", "wrapU", "wrapV",
+    "repeatUV", "offset", "rotateUV", "noiseUV", "vertexUvOne", "vertexUvTwo", "vertexUvThree", "vertexCameraOne",
+)
+
+
+def create_file_texture(path: str, color_space: str | None = None, name: str | None = None, uv_tiling: Any = None) -> Dict[str, str]:
+    """Create a file node plus a place2dTexture with the 18 standard connections.
+
+    ``color_space`` is a Maya color space name ("sRGB", "Raw", "ACEScg" ...).
+    ``uv_tiling`` is a number or [u, v] pair written to repeatUV.
+    Returns {"file": node, "place2d": node}.
+    """
+    require_maya()
+    base = name or os.path.splitext(os.path.basename(path))[0] or "file"
+    base = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in base)
+    if base[0].isdigit():
+        base = "tex_" + base
+    file_node = cmds.shadingNode("file", asTexture=True, isColorManaged=True, name=base + "_file")
+    p2d = cmds.shadingNode("place2dTexture", asUtility=True, name=base + "_place2d")
+    for attr in PLACE2D_LINKS:
+        cmds.connectAttr("%s.%s" % (p2d, attr), "%s.%s" % (file_node, attr), force=True)
+    cmds.connectAttr(p2d + ".outUV", file_node + ".uvCoord", force=True)
+    cmds.connectAttr(p2d + ".outUvFilterSize", file_node + ".uvFilterSize", force=True)
+    cmds.setAttr(file_node + ".fileTextureName", path.replace("\\", "/"), type="string")
+    if "<udim>" in path.lower() or "<UDIM>" in path:
+        cmds.setAttr(file_node + ".uvTilingMode", 3)
+    if color_space:
+        try:
+            cmds.setAttr(file_node + ".ignoreColorSpaceFileRules", 1)
+            cmds.setAttr(file_node + ".colorSpace", color_space, type="string")
+        except Exception:
+            pass
+    if uv_tiling is not None:
+        if isinstance(uv_tiling, (int, float)):
+            u = v = float(uv_tiling)
+        else:
+            u, v = float(uv_tiling[0]), float(uv_tiling[1])
+        cmds.setAttr(p2d + ".repeatU", u)
+        cmds.setAttr(p2d + ".repeatV", v)
+    return {"file": file_node, "place2d": p2d}
+
+
+def long_name(node: str) -> str:
+    """Full DAG path of ``node`` (falls back to the given name when ls returns nothing)."""
+    found = cmds.ls(node, long=True) or []
+    return found[0] if found else node
+
+
+def long_names(nodes: Sequence[str]) -> List[str]:
+    return [long_name(n) for n in nodes]
+
+
+def world_bbox(nodes: Sequence[str]) -> Dict[str, Any] | None:
+    """World space bounding box of nodes as {min, max, size, center} or None."""
+    try:
+        bb = cmds.exactWorldBoundingBox(list(nodes))
+    except Exception:
+        bb = None
+    if not bb or len(bb) < 6:
+        return None
+    mn = [round(float(v), 4) for v in bb[:3]]
+    mx = [round(float(v), 4) for v in bb[3:6]]
+    return {
+        "min": mn,
+        "max": mx,
+        "size": [round(mx[i] - mn[i], 4) for i in range(3)],
+        "center": [round((mx[i] + mn[i]) * 0.5, 4) for i in range(3)],
+    }
+
+
+def triple(node: str, attr: str, default: float = 0.0) -> List[float]:
+    """Read a 3-component attribute (translate/rotate/scale) as a plain list."""
+    try:
+        value = cmds.getAttr("%s.%s" % (node, attr))
+        if value and isinstance(value[0], (list, tuple)):
+            return [round(float(v), 5) for v in value[0]]
+        if isinstance(value, (list, tuple)) and len(value) == 3:
+            return [round(float(v), 5) for v in value]
+    except Exception:
+        pass
+    return [default, default, default]
+
+
 def new_nodes_since(before: Sequence[str]) -> List[str]:
     before_set = set(before)
     return [n for n in (cmds.ls(long=True) or []) if n not in before_set]
 
 
-def download(url: str, suffix: str = "", headers: Optional[Dict[str, str]] = None, folder: Optional[str] = None) -> str:
+def download(url: str, suffix: str = "", headers: Dict[str, str] | None = None, folder: str | None = None) -> str:
     """Download a URL to a temp file and return the path (stdlib only)."""
     folder = folder or os.path.join(tempfile.gettempdir(), "automaya")
     os.makedirs(folder, exist_ok=True)
@@ -113,7 +229,7 @@ def read_file_base64(path: str) -> str:
         return base64.b64encode(fh.read()).decode("ascii")
 
 
-def import_file(path: str, namespace: Optional[str] = None, group_name: Optional[str] = None) -> Dict[str, Any]:
+def import_file(path: str, namespace: str | None = None, group_name: str | None = None) -> Dict[str, Any]:
     """Import obj/fbx/abc/usd/ma/mb and return the new top level transforms."""
     require_maya()
     ext = os.path.splitext(path)[1].lower()
@@ -152,7 +268,7 @@ def import_file(path: str, namespace: Optional[str] = None, group_name: Optional
     return {"path": path, "top_nodes": new}
 
 
-def _import_gltf(path: str, group_name: Optional[str]) -> Dict[str, Any]:
+def _import_gltf(path: str, group_name: str | None) -> Dict[str, Any]:
     """Maya 2024 has no native glTF import. Try the Autodesk glTF plugin, then
     fall back to converting via the bundled mayaUsd (USD can read glTF when the
     usd plugin was built with it), otherwise tell the caller to request FBX/OBJ."""
@@ -173,7 +289,7 @@ def _import_gltf(path: str, group_name: Optional[str]) -> Dict[str, Any]:
     )
 
 
-def export_selection(path: str, nodes: Sequence[str], fmt: str, options: Optional[Dict[str, Any]] = None) -> str:
+def export_selection(path: str, nodes: Sequence[str], fmt: str, options: Dict[str, Any] | None = None) -> str:
     require_maya()
     fmt = fmt.lower()
     cmds.select(list(nodes), replace=True)
@@ -198,6 +314,8 @@ def export_selection(path: str, nodes: Sequence[str], fmt: str, options: Optiona
         ensure_plugin("mayaUsdPlugin")
         opts = "exportUVs=1;exportSkels=none;exportSkin=none;exportBlendShapes=0;exportDisplayColor=0;exportColorSets=1;defaultMeshScheme=catmullClark;animation=%d;" % (
             1 if options and options.get("animation") else 0)
+        if options and options.get("animation") and options.get("start") is not None and options.get("end") is not None:
+            opts += "startTime=%s;endTime=%s;frameStride=1;" % (options["start"], options["end"])
         cmds.file(path, force=True, exportSelected=True, type="USD Export", options=opts)
     elif fmt in ("ma", "mb"):
         cmds.file(path, force=True, exportSelected=True, type="mayaAscii" if fmt == "ma" else "mayaBinary")

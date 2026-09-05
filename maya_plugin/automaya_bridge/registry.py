@@ -11,7 +11,7 @@ from __future__ import annotations
 import inspect
 import time
 import traceback
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
 try:  # Maya is optional so the module can be unit tested outside Maya.
     from maya import cmds  # type: ignore
@@ -45,7 +45,7 @@ def command(name: str, mutates: bool = False) -> Callable[[Callable[..., Any]], 
     return decorator
 
 
-def get(name: str) -> Optional[CommandSpec]:
+def get(name: str) -> CommandSpec | None:
     return _REGISTRY.get(name)
 
 
@@ -75,7 +75,7 @@ class UndoChunk:
     def __init__(self, name: str) -> None:
         self.name = name
 
-    def __enter__(self) -> "UndoChunk":
+    def __enter__(self) -> UndoChunk:
         if cmds is not None:
             cmds.undoInfo(openChunk=True, chunkName="AutoMaya:%s" % self.name)
         return self

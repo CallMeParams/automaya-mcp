@@ -4,7 +4,7 @@ This module is the reference pattern for every other tool module.
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,14 +28,14 @@ class ExecuteMelInput(BaseModel):
 class LogInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     count: int = Field(default=50, ge=1, le=2000, description="Number of most recent log lines")
-    level: Optional[str] = Field(default=None, description="Filter: cmd, ok, error, warn, info, repl")
+    level: str | None = Field(default=None, description="Filter: cmd, ok, error, warn, info, repl")
 
 
 class DrainChangesInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    since_seq: Optional[int] = Field(default=None, ge=0, description="Return events after this sequence number. Omit to continue from the last drain in this session.")
+    since_seq: int | None = Field(default=None, ge=0, description="Return events after this sequence number. Omit to continue from the last drain in this session.")
     limit: int = Field(default=200, ge=1, le=5000)
-    kinds: Optional[List[str]] = Field(default=None, description="Only these kinds: attr_changed, node_added, node_removed, selection_changed, time_changed, connection_made, connection_broken, scene_opened, scene_saved, undo, redo")
+    kinds: List[str] | None = Field(default=None, description="Only these kinds: attr_changed, node_added, node_removed, selection_changed, time_changed, connection_made, connection_broken, scene_opened, scene_saved, undo, redo")
     human_only: bool = Field(default=False, description="Only events caused by the user, not by this agent")
     summary: bool = Field(default=True, description="True: compact per node summary. False: raw event list")
 
@@ -43,8 +43,8 @@ class DrainChangesInput(BaseModel):
 class EventsControlInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: str = Field(default="status", description="start | stop | watch | status")
-    nodes: Optional[List[str]] = Field(default=None, description="For action=watch: restrict attribute events to these nodes (empty list = all)")
-    transform_only: Optional[bool] = Field(default=None, description="Only emit translate/rotate/scale/visibility changes")
+    nodes: List[str] | None = Field(default=None, description="For action=watch: restrict attribute events to these nodes (empty list = all)")
+    transform_only: bool | None = Field(default=None, description="Only emit translate/rotate/scale/visibility changes")
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:

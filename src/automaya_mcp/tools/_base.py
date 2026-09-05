@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from mcp.server.fastmcp import Image
 
@@ -47,18 +47,18 @@ class ToolContext:
         self.bridge = bridge
         self.last_event_seq = 0
 
-    async def run(self, command: str, params: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None, limit: int = MAX_TEXT) -> str:
+    async def run(self, command: str, params: Dict[str, Any] | None = None, timeout: float | None = None, limit: int = MAX_TEXT) -> str:
         try:
             result = await self.bridge.acall(command, _clean(params), timeout)
         except Exception as exc:  # noqa: BLE001
             return error_text(exc)
         return dumps(result, limit)
 
-    async def raw(self, command: str, params: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Any:
+    async def raw(self, command: str, params: Dict[str, Any] | None = None, timeout: float | None = None) -> Any:
         """Like run but returns the Python result and re-raises errors."""
         return await self.bridge.acall(command, _clean(params), timeout)
 
-    async def image(self, command: str, params: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Any:
+    async def image(self, command: str, params: Dict[str, Any] | None = None, timeout: float | None = None) -> Any:
         """Run a command whose result has ``image_base64`` and ``format`` and return an MCP Image."""
         try:
             result = await self.bridge.acall(command, _clean(params), timeout)
@@ -72,7 +72,7 @@ class ToolContext:
         return [Image(data=data, format=fmt), dumps(meta, 4000)]
 
 
-def _clean(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _clean(params: Dict[str, Any] | None) -> Dict[str, Any]:
     """Drop None values so plugin defaults apply."""
     if not params:
         return {}

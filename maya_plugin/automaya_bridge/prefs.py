@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 PROVIDER_KEYS = [
     "TRIPO_API_KEY",
@@ -60,7 +60,7 @@ def prefs_path() -> str:
 def load() -> Dict[str, Any]:
     data = json.loads(json.dumps(DEFAULTS))
     try:
-        with open(prefs_path(), "r", encoding="utf-8") as fh:
+        with open(prefs_path(), encoding="utf-8") as fh:
             stored = json.load(fh)
     except (OSError, ValueError):
         return data
@@ -82,7 +82,7 @@ def save(data: Dict[str, Any]) -> None:
         pass
 
 
-def get_key(name: str) -> Optional[str]:
+def get_key(name: str) -> str | None:
     value = os.environ.get(name)
     if value:
         return value

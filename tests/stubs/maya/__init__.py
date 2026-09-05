@@ -65,6 +65,12 @@ class _CmdsStub(types.ModuleType):
             return "y"
         if name == "file":
             return ""
+        if name == "rename":
+            return args[1] if len(args) > 1 else args[0]
+        if name in ("createNode", "shadingNode", "sets", "group", "nucleus", "ikHandle"):
+            if name == "ikHandle":
+                return [kwargs.get("name", "ikHandle1"), "effector1"]
+            return kwargs.get("name") or kwargs.get("n") or ((args[0] if args and isinstance(args[0], str) else name) + "1")
         if name == "playbackOptions":
             return 1.0
         if name in ("polySphere", "polyCube", "polyCylinder", "polyPlane", "polyTorus", "polyCone", "camera", "joint", "group", "duplicate", "circle", "curve", "spaceLocator", "shadingNode", "sets", "createNode", "polyPipe", "polyDisc", "polyPrism", "polyPyramid", "polyHelix", "polyPlatonic", "polySuperShape", "instance", "rename", "ikHandle", "parent", "aimConstraint", "pointConstraint", "orientConstraint", "parentConstraint", "listRelatives", "listConnections", "listAttr", "listHistory", "polyEvaluate", "polyInfo", "polyExtrudeFacet", "polyBevel3", "polyBoolOp", "polyUnite", "polySeparate", "polyMirrorFace", "polySmooth", "polyReduce", "lattice", "cluster", "nonLinear", "textCurves", "extrude", "loft", "revolve", "nurbsToPoly", "polyAutoProjection", "polyCleanupArgList", "imagePlane", "playblast", "render", "keyframe", "listCameras", "ambientLight", "directionalLight", "pointLight", "spotLight", "areaLight", "skinCluster", "bakeResults", "pathAnimation", "blendShape", "particle", "nParticle", "emitter", "gravity", "turbulence", "nucleus", "fluidEmitter", "instancer", "lookThru", "shot", "sequenceManager", "menu", "menuItem", "workspaceControl", "help", "namespace", "referenceQuery"):

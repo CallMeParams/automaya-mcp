@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from . import events, prefs, protocol, server
 
 try:
-    from maya import cmds, OpenMayaUI as omui  # type: ignore
+    from maya import OpenMayaUI as omui
+    from maya import cmds  # type: ignore
     from PySide2 import QtCore, QtGui, QtWidgets  # type: ignore
     from shiboken2 import wrapInstance  # type: ignore
     HAVE_QT = True
@@ -48,7 +49,7 @@ INTEGRATION_LABELS = [
 ]
 
 
-def _maya_main_window() -> Optional["QtWidgets.QWidget"]:
+def _maya_main_window() -> QtWidgets.QWidget | None:
     ptr = omui.MQtUtil.mainWindow()
     if ptr is None:
         return None
@@ -62,7 +63,7 @@ if HAVE_QT:
         event = QtCore.Signal(dict)
 
     class ConsoleWidget(QtWidgets.QWidget):
-        def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
             super().__init__(parent)
             self.setObjectName(WIDGET_NAME)
             self.signals = _Signals()

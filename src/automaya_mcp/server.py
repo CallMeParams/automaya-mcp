@@ -13,7 +13,7 @@ import importlib
 import logging
 import sys
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Optional
+from typing import AsyncIterator, Dict
 
 from mcp.server.fastmcp import FastMCP
 
@@ -39,7 +39,7 @@ TOOL_MODULES = [
 log = logging.getLogger("automaya")
 
 
-def create_app(bridge: Optional[MayaConnection] = None, modules: Optional[list] = None) -> FastMCP:
+def create_app(bridge: MayaConnection | None = None, modules: list | None = None) -> FastMCP:
     bridge = bridge or connection_from_env()
     ctx = ToolContext(bridge)
 
@@ -79,7 +79,7 @@ def create_app(bridge: Optional[MayaConnection] = None, modules: Optional[list] 
     return mcp
 
 
-def main(argv: Optional[list] = None) -> None:
+def main(argv: list | None = None) -> None:
     argv = sys.argv[1:] if argv is None else argv
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(name)s %(levelname)s %(message)s")
     if argv and argv[0] == "install-plugin":

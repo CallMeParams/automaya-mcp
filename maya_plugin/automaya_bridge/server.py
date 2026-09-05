@@ -17,12 +17,13 @@ import socket
 import threading
 import time
 import traceback
-from typing import Any, Callable, Deque, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, List
 
 from . import protocol, registry
 
 try:
-    from maya import cmds, utils as maya_utils  # type: ignore
+    from maya import cmds  # type: ignore
+    from maya import utils as maya_utils
 except ImportError:  # pragma: no cover
     cmds = None  # type: ignore
     maya_utils = None  # type: ignore
@@ -51,7 +52,7 @@ class RingLog:
             except Exception:  # a broken UI listener must not kill the server
                 pass
 
-    def tail(self, n: int = 200, level: Optional[str] = None) -> List[Dict[str, Any]]:
+    def tail(self, n: int = 200, level: str | None = None) -> List[Dict[str, Any]]:
         with self._lock:
             items = list(self._items)
         if level:
@@ -92,8 +93,8 @@ class BridgeServer:
         self.host = host
         self.port = port
         self.running = False
-        self._sock: Optional[socket.socket] = None
-        self._thread: Optional[threading.Thread] = None
+        self._sock: socket.socket | None = None
+        self._thread: threading.Thread | None = None
         self._clients: List[socket.socket] = []
         self._clients_lock = threading.Lock()
         self.stats = {"commands": 0, "errors": 0, "started_at": None, "clients_total": 0}
@@ -148,7 +149,7 @@ class BridgeServer:
         while self.running:
             try:
                 client, addr = self._sock.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
@@ -226,10 +227,10 @@ def _short(value: Any, limit: int = 300) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
-_SERVER: Optional[BridgeServer] = None
+_SERVER: BridgeServer | None = None
 
 
-def get_server() -> Optional[BridgeServer]:
+def get_server() -> BridgeServer | None:
     return _SERVER
 
 

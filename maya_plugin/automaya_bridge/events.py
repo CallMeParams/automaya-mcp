@@ -21,7 +21,7 @@ import json
 import socket
 import threading
 import time
-from typing import Any, Deque, Dict, List, Optional, Set
+from typing import Any, Deque, Dict, List, Set
 
 try:
     import maya.api.OpenMaya as om  # type: ignore
@@ -45,7 +45,7 @@ class EventBus:
         self._watched: Set[str] = set()  # empty means "everything"
         self.transform_only = False
         self.active = False
-        self.broadcaster: Optional[Broadcaster] = None
+        self.broadcaster: Broadcaster | None = None
         self.human_activity = True  # False while a bridge command is running
 
     # public ----------------------------------------------------------------
@@ -100,7 +100,7 @@ class EventBus:
             self.broadcaster.publish(event)
         return event
 
-    def drain(self, since_seq: int = 0, limit: int = 500, kinds: Optional[List[str]] = None, human_only: bool = False) -> Dict[str, Any]:
+    def drain(self, since_seq: int = 0, limit: int = 500, kinds: List[str] | None = None, human_only: bool = False) -> Dict[str, Any]:
         with self._lock:
             items = [e for e in self._events if e["seq"] > since_seq]
         if kinds:
@@ -110,6 +110,22 @@ class EventBus:
         truncated = len(items) > limit
         items = items[-limit:]
         return {"events": items, "last_seq": self._seq, "truncated": truncated, "active": self.active}
+
+    @property
+    def last_seq(self) -> int:
+        return self._seq
+
+    def rate(self, window: float = 5.0) -> float:
+        """Events per second over the last ``window`` seconds (from the ring buffer)."""
+        now = time.time()
+        with self._lock:
+            recent = [e for e in self._events if now - e["ts"] <= window]
+        if not recent or window <= 0:
+            return 0.0
+        return round(len(recent) / window, 2)
+
+    def watched(self) -> List[str]:
+        return sorted(self._watched)
 
     def summary(self, since_seq: int = 0) -> Dict[str, Any]:
         """Compressed view: which nodes changed, added, removed since seq."""
@@ -231,7 +247,7 @@ def _node_type(mobj: Any) -> str:
         return "unknown"
 
 
-def _plug_name(plug: Any) -> Optional[str]:
+def _plug_name(plug: Any) -> str | None:
     try:
         return plug.name() if not plug.isNull else None
     except Exception:
@@ -285,15 +301,29 @@ class Broadcaster:
         self.host = host
         self.port = port
         self.running = False
-        self._sock: Optional[socket.socket] = None
+        self._sock: socket.socket | None = None
         self._subs: List[socket.socket] = []
         self._lock = threading.Lock()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self.sent = 0
+        self.started_at: float | None = None
+        self.clients_total = 0
+        self.scene_info: Dict[str, Any] = {}
 
     def start(self) -> None:
+        """Bind and start accepting. Call from the main thread so the hello line
+        can be seeded with scene units and up axis."""
         if self.running:
             return
+        if cmds is not None:
+            try:
+                self.scene_info = {
+                    "unit": cmds.currentUnit(query=True, linear=True),
+                    "up_axis": cmds.upAxis(query=True, axis=True),
+                    "scene": _scene_name(),
+                }
+            except Exception:
+                self.scene_info = {}
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((self.host, self.port))
@@ -301,6 +331,7 @@ class Broadcaster:
         s.settimeout(1.0)
         self._sock = s
         self.running = True
+        self.started_at = time.time()
         self._thread = threading.Thread(target=self._accept, name="AutoMayaEvents", daemon=True)
         self._thread.start()
 
@@ -330,17 +361,26 @@ class Broadcaster:
         while self.running:
             try:
                 c, _ = self._sock.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
             c.setblocking(True)
             with self._lock:
                 self._subs.append(c)
+                self.clients_total += 1
             try:
-                c.sendall((json.dumps({"kind": "hello", "protocol": 1, "ts": time.time()}) + "\n").encode("utf-8"))
+                c.sendall((json.dumps(self.hello()) + "\n").encode("utf-8"))
             except OSError:
                 pass
+
+    def hello(self) -> Dict[str, Any]:
+        """First line every subscriber receives. Carries what a receiver needs to
+        interpret the stream (units, up axis, scene). Built from ``scene_info``
+        captured on the main thread at start(), since this runs on the accept thread."""
+        info: Dict[str, Any] = {"kind": "hello", "protocol": 1, "ts": time.time(), "event_port": self.port}
+        info.update(self.scene_info)
+        return info
 
     def publish(self, event: Dict[str, Any]) -> None:
         if not self.running:

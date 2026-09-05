@@ -12,7 +12,7 @@ import os
 import socket
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from . import protocol
 
@@ -20,7 +20,7 @@ from . import protocol
 class MayaError(Exception):
     """Raised when the plugin returns status=error. ``payload`` has details."""
 
-    def __init__(self, message: str, payload: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, message: str, payload: Dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.payload = payload or {}
 
@@ -42,10 +42,10 @@ class MayaConnection:
         self.host = host
         self.port = port
         self.default_timeout = default_timeout
-        self._sock: Optional[socket.socket] = None
+        self._sock: socket.socket | None = None
         self._lock = threading.Lock()
         self.handshake: Dict[str, Any] = {}
-        self.last_error: Optional[str] = None
+        self.last_error: str | None = None
 
     # connection ------------------------------------------------------------
     def connect(self, timeout: float = 3.0) -> bool:
@@ -83,7 +83,7 @@ class MayaConnection:
         return self._sock is not None
 
     # requests --------------------------------------------------------------
-    def call(self, command: str, params: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Any:
+    def call(self, command: str, params: Dict[str, Any] | None = None, timeout: float | None = None) -> Any:
         """Send one command and return its ``result``; raises MayaError on failure."""
         timeout = timeout or self.default_timeout
         with self._lock:
@@ -98,7 +98,7 @@ class MayaConnection:
                 self._sock.settimeout(timeout)
                 protocol.write_frame(self._sock, request)
                 response = protocol.read_frame(self._sock)
-            except socket.timeout:
+            except TimeoutError:
                 self._close_locked()
                 raise MayaError("Maya did not answer %s within %.0fs. Maya may be busy (render, simulation, modal dialog)." % (command, timeout))
             except (OSError, protocol.ProtocolError) as exc:
@@ -120,7 +120,7 @@ class MayaConnection:
             raise MayaError(response.get("message", "unknown error from Maya"), response)
         return response.get("result")
 
-    async def acall(self, command: str, params: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Any:
+    async def acall(self, command: str, params: Dict[str, Any] | None = None, timeout: float | None = None) -> Any:
         """Async wrapper so tools never block the MCP event loop."""
         return await asyncio.to_thread(self.call, command, params, timeout)
 
@@ -129,7 +129,7 @@ class MayaConnection:
         return self.handshake
 
 
-def discover_ports(host: str = protocol.DEFAULT_HOST, ports: Optional[List[int]] = None, timeout: float = 0.3) -> List[int]:
+def discover_ports(host: str = protocol.DEFAULT_HOST, ports: List[int] | None = None, timeout: float = 0.3) -> List[int]:
     """Probe candidate ports for a live bridge (for multiple Maya sessions)."""
     ports = ports or list(range(protocol.DEFAULT_PORT, protocol.DEFAULT_PORT + 10))
     found = []
@@ -160,7 +160,7 @@ class EventSubscriber:
         self.host = host
         self.port = port
         self.events: List[Dict[str, Any]] = []
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
     def start(self) -> None:
@@ -182,7 +182,7 @@ class EventSubscriber:
                     while not self._stop.is_set():
                         try:
                             chunk = s.recv(65536)
-                        except socket.timeout:
+                        except TimeoutError:
                             continue
                         if not chunk:
                             break

@@ -11,7 +11,7 @@ import json
 import socket
 import struct
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 PROTOCOL_VERSION = 1
 DEFAULT_PORT = 9877
@@ -25,15 +25,15 @@ class ProtocolError(Exception):
     """Raised when a frame is malformed or exceeds limits."""
 
 
-def make_request(command: str, params: Optional[Dict[str, Any]] = None, request_id: Optional[str] = None) -> Dict[str, Any]:
+def make_request(command: str, params: Dict[str, Any] | None = None, request_id: str | None = None) -> Dict[str, Any]:
     return {"id": request_id or uuid.uuid4().hex, "type": command, "params": params or {}}
 
 
-def make_success(request_id: Optional[str], result: Any, elapsed_ms: float = 0.0) -> Dict[str, Any]:
+def make_success(request_id: str | None, result: Any, elapsed_ms: float = 0.0) -> Dict[str, Any]:
     return {"id": request_id, "status": "success", "result": result, "elapsed_ms": round(elapsed_ms, 2)}
 
 
-def make_error(request_id: Optional[str], message: str, traceback_text: str = "", code: str = "error", elapsed_ms: float = 0.0) -> Dict[str, Any]:
+def make_error(request_id: str | None, message: str, traceback_text: str = "", code: str = "error", elapsed_ms: float = 0.0) -> Dict[str, Any]:
     return {
         "id": request_id,
         "status": "error",
