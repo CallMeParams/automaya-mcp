@@ -105,7 +105,7 @@ class EventBus:
 
     def drain(self, since_seq: int = 0, limit: int = 500, kinds: List[str] | None = None, human_only: bool = False) -> Dict[str, Any]:
         with self._lock:
-            items = [e for e in self._events if e["seq"] > since_seq]
+            items = [e for e in self._events if e.get("seq", 0) > since_seq]
         if kinds:
             items = [e for e in items if e["kind"] in kinds]
         if human_only:
@@ -133,19 +133,19 @@ class EventBus:
     def summary(self, since_seq: int = 0) -> Dict[str, Any]:
         """Compressed view: which nodes changed, added, removed since seq."""
         with self._lock:
-            items = [e for e in self._events if e["seq"] > since_seq]
+            items = [e for e in self._events if e.get("seq", 0) > since_seq]
         changed: Dict[str, Set[str]] = {}
         added: List[str] = []
         removed: List[str] = []
         other: Dict[str, int] = {}
         for e in items:
-            k = e["kind"]
+            k = e.get("kind", "?")
             if k == "attr_changed":
-                changed.setdefault(e["node"], set()).add(e["attr"])
+                changed.setdefault(e.get("node", "?"), set()).add(e.get("attr", "?"))
             elif k == "node_added":
-                added.append(e["node"])
+                added.append(e.get("node", "?"))
             elif k == "node_removed":
-                removed.append(e["node"])
+                removed.append(e.get("node", "?"))
             else:
                 other[k] = other.get(k, 0) + 1
         return {

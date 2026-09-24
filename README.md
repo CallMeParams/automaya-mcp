@@ -44,6 +44,10 @@ Add the server to your MCP client:
 }
 ```
 
+No Python 3.10 on the box (common on studio Windows images)? Run the server with Maya's own interpreter: see the header of `scripts/mayapy_launch.py` for the one line pip install, then use `"command": "C:\\Program Files\\Autodesk\\Maya2024\\bin\\mayapy.exe", "args": ["C:\\Users\\you\\.automaya\\launch.py"]`. Pin `mcp==1.27.0` there.
+
+Headless Maya (mayapy, render farm, CI): `cmds` misbehaves off the main thread, so start the bridge and hand the main thread to it: `automaya_bridge.start(); automaya_bridge.serve_forever()` (or call `automaya_bridge.pump()` from your own loop).
+
 Claude Desktop: `claude_desktop_config.json`. Claude Code: `.mcp.json` in your project or `claude mcp add automaya -- automaya-mcp`.
 
 Ask Claude: "check the Maya status, then build a 35mm shot camera on a crane rig and block a rough street with primitives."
@@ -106,7 +110,7 @@ NVIDIA's Omniverse Maya Native Connector (Maya 2024.2 on Windows, needs mayaUsd,
 ## Development
 
 ```bash
-python3 -m pytest -q             # 520 tests: protocol, registry, every domain over a real socket against a maya stub
+python3 -m pytest -q             # 524 tests: protocol, registry, every domain over a real socket against a maya stub
 ruff check src maya_plugin tests unreal
 mayapy tests/maya_integration/run_in_mayapy.py   # integration pattern inside a real Maya
 python3 scripts/gen_tool_catalogue.py            # refresh docs/TOOLS.md

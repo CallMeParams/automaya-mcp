@@ -15,7 +15,10 @@ from __future__ import annotations
 from . import prefs, protocol, server
 
 __version__ = server.PLUGIN_VERSION
-__all__ = ["start", "stop", "show_console", "install_menu", "__version__"]
+__all__ = ["start", "stop", "serve_forever", "pump", "show_console", "install_menu", "__version__"]
+
+serve_forever = server.serve_forever
+pump = server.pump
 
 
 def start(port: int | None = None, events: bool | None = None) -> server.BridgeServer:

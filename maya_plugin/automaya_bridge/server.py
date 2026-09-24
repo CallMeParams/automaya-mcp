@@ -6,13 +6,16 @@ Design (mirrors what makes Blender MCP reliable, adapted to Maya):
 * one daemon thread per client reads length prefixed JSON frames
 * every command is marshalled to Maya's main thread with
   ``maya.utils.executeInMainThreadWithResult`` so ``cmds`` is always safe;
-  in batch / mayapy sessions (no UI event loop) it runs inline instead
+  in batch / mayapy sessions (no UI event loop) the main thread calls
+  ``serve_forever()`` (or ``pump()`` from its own loop) and socket threads
+  queue work for it, because ``cmds`` misbehaves off the main thread there
 * results go back on the client thread, so the UI is never blocked by I/O
 * a ring buffer of log lines feeds the console dock and ``core.get_log``
 """
 from __future__ import annotations
 
 import collections
+import queue
 import socket
 import threading
 import time
@@ -92,11 +95,80 @@ def _in_batch_mode() -> bool:
     return _BATCH_MODE
 
 
+_MAIN_QUEUE: queue.Queue[tuple] = queue.Queue()
+_PUMP_ACTIVE = threading.Event()
+
+
+def _on_main_thread() -> bool:
+    return threading.get_ident() == threading.main_thread().ident
+
+
 def run_on_main_thread(func: Callable[[], Any]) -> Any:
-    """Execute ``func`` on Maya's main thread and return its result."""
-    if maya_utils is None or _in_batch_mode():
+    """Execute ``func`` on Maya's main thread and return its result.
+
+    Interactive Maya: ``executeInMainThreadWithResult``. Batch (mayapy): if the
+    main thread is pumping, queue the job and wait; otherwise run inline (plain
+    Python tests with the maya stub, or a caller already on the main thread).
+    """
+    if maya_utils is not None and not _in_batch_mode():
+        return maya_utils.executeInMainThreadWithResult(func)
+    if _on_main_thread() or not _PUMP_ACTIVE.is_set():
         return func()
-    return maya_utils.executeInMainThreadWithResult(func)
+    done = threading.Event()
+    box: Dict[str, Any] = {}
+    _MAIN_QUEUE.put((func, done, box))
+    done.wait()
+    if "error" in box:
+        raise box["error"]
+    return box.get("result")
+
+
+def pump(timeout: float = 0.05, max_jobs: int = 64) -> int:
+    """Run queued bridge jobs on the calling (main) thread. Returns how many ran.
+
+    Call this from your own loop in mayapy if you do not want ``serve_forever``.
+    """
+    _PUMP_ACTIVE.set()
+    ran = 0
+    wait = timeout
+    while ran < max_jobs:
+        try:
+            func, done, box = _MAIN_QUEUE.get(timeout=wait)
+        except queue.Empty:
+            break
+        try:
+            box["result"] = func()
+        except BaseException as exc:  # handed back to the socket thread
+            box["error"] = exc
+        finally:
+            done.set()
+        ran += 1
+        wait = 0.0
+    return ran
+
+
+def serve_forever(stop_event: threading.Event | None = None, poll: float = 0.05) -> None:
+    """Block the main thread and execute bridge commands until stopped.
+
+    For mayapy / render farm / CI: ``automaya_bridge.start(); automaya_bridge.serve_forever()``.
+    Ctrl+C or setting ``stop_event`` returns.
+    """
+    _PUMP_ACTIVE.set()
+    try:
+        while stop_event is None or not stop_event.is_set():
+            pump(timeout=poll)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        _PUMP_ACTIVE.clear()
+        # release anyone still waiting so their sockets get an answer
+        while True:
+            try:
+                _func, done, box = _MAIN_QUEUE.get_nowait()
+            except queue.Empty:
+                break
+            box["error"] = RuntimeError("bridge pump stopped")
+            done.set()
 
 
 class BridgeServer:
