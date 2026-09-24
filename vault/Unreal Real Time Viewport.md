@@ -20,4 +20,7 @@ Maya: right handed, Y up, cm. Unreal: left handed, Z up, cm. Position (x, y, z) 
 ## Going from Python subscriber to a real Live Link source
 A C++ `ILiveLinkSource` that reads the same NDJSON: transforms become `FLiveLinkTransformFrameData`, cameras `FLiveLinkCameraFrameData`, lights `FLiveLinkLightFrameData`; `time_changed` maps to the frame's `WorldTime` and `MetaData.SceneTime`. Outline and class list in `docs/UNREAL_BRIDGE.md`. Autodesk's own Maya Live Link plugin can run alongside for skeletal streaming. Epic's MobuLiveLink (MotionBuilder) is the reference for the provider side: an `ILiveLinkProvider` over the message bus that Unreal picks up with the stock Live Link plugin; see docs/UNREAL_BRIDGE.md.
 
-Related: [[Wire Protocol]], [[Roadmap]]
+## Omniverse alongside
+On Maya 2024.2 with NVIDIA's connector, an Omniverse live session with USD Composer is a quicker RTX viewport; see [[Omniverse]]. The USD plus subscriber path here is the one that survives Maya upgrades.
+
+Related: [[Wire Protocol]], [[Roadmap]], [[Omniverse]]

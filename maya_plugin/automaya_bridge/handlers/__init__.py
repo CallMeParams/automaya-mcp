@@ -28,6 +28,7 @@ MODULES = [
     "light",
     "lookdev",
     "photo",
+    "omniverse",
     "extensions",
 ]
 

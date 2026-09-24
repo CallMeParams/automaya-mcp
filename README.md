@@ -1,6 +1,6 @@
 # AutoMaya MCP
 
-Control Autodesk Maya 2024 from Claude (Desktop, Code, Cursor, any MCP client) with 244 typed tools, an in-Maya console, free asset libraries, AI 3D generation, and a real time change stream built for driving an external viewport such as Unreal.
+Control Autodesk Maya 2024 from Claude (Desktop, Code, Cursor, any MCP client) with 258 typed tools, an in-Maya console, free asset libraries, AI 3D generation, and a real time change stream built for driving an external viewport such as Unreal.
 
 ```
 Claude  <-- MCP stdio -->  automaya_mcp (Python)  <-- framed TCP 9877 -->  AutoMaya bridge inside Maya
@@ -65,7 +65,7 @@ Keys can also be pasted into the Settings dialog (gear button in the console hea
 
 ## Tool families
 
-core, scene, modeling, materials, rigging_animation, previs, sim_vfx, arnold, assets, generation, intelligence, livelink, introspect, extensions (drop-in scripts, see below), plus the Craft layer: craft_procgen (parametric buildings, streets, rooms, furniture, terrain, scatter at real scale), craft_light (solar position, HDRI, three point and studio rigs, practicals in lumens and Kelvin, exposure in EV), craft_lookdev (measured PBR library, wear, variation, ACES, render presets), craft_critique (render analysis and reference comparison with concrete fixes), craft_photo (camera match, photo to block, depth relief), craft_plan (scene plan, quality gate). See [docs/CRAFT.md](docs/CRAFT.md). The full list with parameters is in [docs/TOOLS.md](docs/TOOLS.md). Prompts shipped with the server: `asset_creation_strategy`, `previs_shot_workflow`, `unreal_realtime_viewport`, `astra_loop`, `lighting_science`, `photo_to_scene`.
+core, scene, modeling, materials, rigging_animation, previs, sim_vfx, arnold, assets, generation, intelligence, livelink, introspect, omniverse (NVIDIA Omniverse connector detection, live sessions, USD export), extensions (drop-in scripts, see below), plus the Craft layer: craft_procgen (parametric buildings, streets, rooms, furniture, terrain, scatter at real scale), craft_light (solar position, HDRI, three point and studio rigs, practicals in lumens and Kelvin, exposure in EV), craft_lookdev (measured PBR library, wear, variation, ACES, render presets), craft_critique (render analysis and reference comparison with concrete fixes), craft_photo (camera match, photo to block, depth relief), craft_plan (scene plan, quality gate). See [docs/CRAFT.md](docs/CRAFT.md). The full list with parameters is in [docs/TOOLS.md](docs/TOOLS.md). Prompts shipped with the server: `asset_creation_strategy`, `previs_shot_workflow`, `unreal_realtime_viewport`, `astra_loop`, `lighting_science`, `photo_to_scene`.
 
 ## Extensions: drop a script, get tools
 
@@ -99,10 +99,14 @@ Rules: JSON types in and out, Maya imports inside the function, names starting w
 
 The schema, coordinate conversion, and the outline for turning the subscriber into a C++ `ILiveLinkSource` are in [docs/UNREAL_BRIDGE.md](docs/UNREAL_BRIDGE.md).
 
+### Omniverse
+
+NVIDIA's Omniverse Maya Native Connector (Maya 2024.2 on Windows, needs mayaUsd, discontinued for Maya 2025+) gives a quick two way RTX viewport through USD Composer live sessions. `maya_omni_status` detects it at runtime (its scripting API is undocumented) and says whether you are on the `connector` or `usd_only` path; `maya_omni_list_commands` and `maya_omni_run_menu_item` drive its menu and shelf; `maya_omni_live_session` creates, joins, leaves, ends, merges or shares a session; `maya_omni_export_usd` writes USD locally through mayaUsd; `maya_omni_nucleus_hint` covers Nucleus URLs and the viewport steps. The USD plus Unreal subscriber path above is the one that survives Maya upgrades. Details in `vault/Omniverse.md`.
+
 ## Development
 
 ```bash
-python3 -m pytest -q             # 497 tests: protocol, registry, every domain over a real socket against a maya stub
+python3 -m pytest -q             # 520 tests: protocol, registry, every domain over a real socket against a maya stub
 ruff check src maya_plugin tests unreal
 mayapy tests/maya_integration/run_in_mayapy.py   # integration pattern inside a real Maya
 python3 scripts/gen_tool_catalogue.py            # refresh docs/TOOLS.md

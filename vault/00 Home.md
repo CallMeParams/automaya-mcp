@@ -13,6 +13,7 @@ Knowledge base for the AutoMaya MCP project: an MCP server plus in-Maya bridge t
 - [[Maya 2024 Facts]] interpreter, Qt, threading rules, import formats, gotchas
 - [[Providers]] Tripo, Meshy, Rodin, Hunyuan, Higgsfield, Poly Haven, Sketchfab, Poly Pizza contracts
 - [[Unreal Real Time Viewport]] the event stream, coordinate conversion, Live Link path
+- [[Omniverse]] NVIDIA Omniverse connector detection, live sessions, the mayaUsd fallback
 - [[Competitor Teardown]] what the other Maya MCPs do and where AutoMaya goes past them
 - [[Decisions]] architecture decision log
 - [[Testing]] how the stub, fake bridge and mayapy runner work
@@ -25,5 +26,5 @@ Knowledge base for the AutoMaya MCP project: an MCP server plus in-Maya bridge t
 ## Quick facts
 - Repo: `automaya-mcp`, package `automaya_mcp` (server) and `automaya_bridge` (plugin)
 - Ports: 9877 commands, 9878 event broadcast, loopback only
-- 252 tools in 20 modules (plus dynamic maya_ext_* tools), 6 prompts, 497 tests
+- 258 tools in 21 modules (plus dynamic maya_ext_* tools), 6 prompts, 520 tests
 - Owner: Adam Waters, Senior Previs Artist, Sydney
