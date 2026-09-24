@@ -280,6 +280,116 @@ def test_create_animation_layer(fake_maya):
     assert out["members"] == ["pCube1.translateY"] and out["mute"] is True
 
 
+# unit: skin weights --------------------------------------------------------------
+def _skinned(fake_maya, influences=("hip", "spine"), weights=(0.25, 0.75), via_mel=True):
+    """Stub a mesh 'body' bound to skinCluster1 with the given influences and per vertex weights."""
+    mel.responses.clear()
+    if via_mel:
+        mel.responses["findRelatedSkinCluster"] = "skinCluster1"
+    else:
+        fake_maya.responses["listHistory"] = ["skinCluster1", "bodyShapeOrig"]
+    fake_maya.responses["ls"] = lambda *a, **k: (["skinCluster1"] if k.get("type") == "skinCluster" else (["|body"] if a and a[0] == "body" else []))
+    fake_maya.responses["skinCluster"] = lambda *a, **k: list(influences) if k.get("influence") else ["skinCluster1"]
+    fake_maya.responses["skinPercent"] = lambda *a, **k: list(weights) if k.get("query") else None
+    fake_maya.responses["polyEvaluate"] = 8
+
+
+def test_get_skin_cluster_via_mel(fake_maya):
+    _skinned(fake_maya)
+    out = ra.get_skin_cluster("body")
+    mel.responses.clear()
+    assert out["skin_cluster"] == "skinCluster1" and out["influences"] == ["hip", "spine"] and out["vertex_count"] == 8
+    assert any("findRelatedSkinCluster" in code for code in mel.evaluated)
+
+
+def test_get_skin_cluster_falls_back_to_history(fake_maya):
+    _skinned(fake_maya, via_mel=False)
+    out = ra.get_skin_cluster("body")
+    assert out["skin_cluster"] == "skinCluster1"
+    assert fake_maya.calls_to("listHistory")[0][1]["pruneDagObjects"] is True
+
+
+def test_get_skin_cluster_unbound(fake_maya):
+    mel.responses.clear()
+    out = ra.get_skin_cluster("pCube1")
+    assert out["skin_cluster"] is None and out["influences"] == []
+
+
+def test_get_vertex_weights_list_and_min_weight(fake_maya):
+    _skinned(fake_maya, influences=("hip", "spine", "neck"), weights=(0.9, 0.1, 0.00001))
+    out = ra.get_vertex_weights("body", vertices=[0, 3], min_weight=0.001)
+    mel.responses.clear()
+    assert out["weights"] == {"0": {"hip": 0.9, "spine": 0.1}, "3": {"hip": 0.9, "spine": 0.1}}
+    assert out["count"] == 2 and out["truncated"] is False and out["skin_cluster"] == "skinCluster1"
+    args, kwargs = fake_maya.calls_to("skinPercent")[0]
+    assert args == ("skinCluster1", "body.vtx[0]") and kwargs == {"query": True, "value": True}
+
+
+def test_get_vertex_weights_all_and_cap(fake_maya, monkeypatch):
+    _skinned(fake_maya)
+    fake_maya.responses["polyEvaluate"] = 5
+    out = ra.get_vertex_weights("body", vertices="all")
+    assert sorted(out["weights"]) == ["0", "1", "2", "3", "4"] and out["truncated"] is False
+    monkeypatch.setattr(ra, "MAX_WEIGHT_VERTICES", 3)
+    out = ra.get_vertex_weights("body", vertices="all")
+    mel.responses.clear()
+    assert out["count"] == 3 and out["truncated"] is True and out["max_vertices"] == 3
+
+
+def test_get_vertex_weights_errors(fake_maya):
+    _skinned(fake_maya)
+    with pytest.raises(BridgeError, match="list of ints or 'all'"):
+        ra.get_vertex_weights("body", vertices="some")
+    with pytest.raises(BridgeError, match="no vertices"):
+        ra.get_vertex_weights("body", vertices=[])
+    mel.responses.clear()
+    fake_maya.responses["ls"] = lambda *a, **k: []
+    fake_maya.responses["listHistory"] = []
+    with pytest.raises(BridgeError, match="no skinCluster"):
+        ra.get_vertex_weights("pCube1", vertices=[0])
+
+
+def test_set_vertex_weights_multiple_pairs(fake_maya):
+    _skinned(fake_maya, influences=("|root|hip", "|root|hip|spine"), weights=(0.3, 0.7))
+    out = ra.set_vertex_weights("body", vertices=[4, 5], weights={"hip": 0.3, "|root|hip|spine": 0.7}, normalize=False)
+    mel.responses.clear()
+    edits = [(a, k) for a, k in fake_maya.calls_to("skinPercent") if "transformValue" in k]
+    assert len(edits) == 1
+    args, kwargs = edits[0]
+    assert args == ("skinCluster1", ["body.vtx[4]", "body.vtx[5]"])
+    assert kwargs["transformValue"] == [("|root|hip", 0.3), ("|root|hip|spine", 0.7)] and kwargs["normalize"] is False
+    assert out["first_vertex_result"] == {"|root|hip": 0.3, "|root|hip|spine": 0.7} and out["vertices"] == ["body.vtx[4]", "body.vtx[5]"]
+
+
+def test_set_vertex_weights_rejects_unknown_joint_and_bad_value(fake_maya):
+    _skinned(fake_maya)
+    try:
+        with pytest.raises(BridgeError, match="not an influence"):
+            ra.set_vertex_weights("body", vertices=[0], weights={"ghost": 1.0})
+        with pytest.raises(BridgeError, match="between 0 and 1"):
+            ra.set_vertex_weights("body", vertices=[0], weights={"hip": 1.5})
+        with pytest.raises(BridgeError, match="non empty dict"):
+            ra.set_vertex_weights("body", vertices=[0], weights={})
+    finally:
+        mel.responses.clear()
+    assert not [k for a, k in fake_maya.calls_to("skinPercent") if "transformValue" in k]
+
+
+def test_prune_weights_then_normalize(fake_maya):
+    _skinned(fake_maya)
+    out = ra.prune_weights("body", below=0.02, skin_cluster="skinCluster1")
+    mel.responses.clear()
+    calls = fake_maya.calls_to("skinPercent")
+    assert calls[0] == (("skinCluster1", "body.vtx[*]"), {"pruneWeights": 0.02})
+    assert calls[1] == (("skinCluster1", "body.vtx[*]"), {"normalize": True})
+    assert out["pruned_below"] == 0.02 and out["normalized"] is True and out["vertex_count"] == 8
+    fake_maya.calls.clear()
+    ra.prune_weights("body", below=0.01, normalize=False, skin_cluster="skinCluster1")
+    assert len(fake_maya.calls_to("skinPercent")) == 1
+    with pytest.raises(BridgeError, match="between 0 and 1"):
+        ra.prune_weights("body", below=1.0, skin_cluster="skinCluster1")
+
+
 # integration: through the socket + tool layer ------------------------------------
 async def test_tool_create_joint_chain(call_tool, fake_maya):
     _joint(fake_maya, ["a", "b"])
@@ -309,3 +419,20 @@ async def test_tool_error_path_bad_node(call_tool, fake_maya):
 async def test_tool_rejects_unknown_param(call_tool):
     text = await call_tool("maya_set_current_time", {"params": {"frame": 5, "bogus": 1}})
     assert "Error" in text or "bogus" in text
+
+
+async def test_tool_weights_round_trip(call_tool, fake_maya):
+    _skinned(fake_maya)
+    try:
+        data = parse(await call_tool("maya_get_skin_cluster", {"params": {"mesh": "body"}}))
+        assert data["skin_cluster"] == "skinCluster1"
+        data = parse(await call_tool("maya_get_vertex_weights", {"params": {"mesh": "body", "vertices": [1]}}))
+        assert data["weights"] == {"1": {"hip": 0.25, "spine": 0.75}}
+        data = parse(await call_tool("maya_set_vertex_weights", {"params": {"mesh": "body", "vertices": [1], "weights": {"hip": 0.5, "spine": 0.5}}}))
+        assert data["set"] == {"hip": 0.5, "spine": 0.5} and data["normalized"] is True
+        data = parse(await call_tool("maya_prune_weights", {"params": {"mesh": "body", "below": 0.05}}))
+        assert data["pruned_below"] == 0.05
+        text = await call_tool("maya_get_vertex_weights", {"params": {"mesh": "body", "vertices": "some"}})
+        assert text.startswith("Error")
+    finally:
+        mel.responses.clear()

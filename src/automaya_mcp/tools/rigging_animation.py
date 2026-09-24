@@ -1,7 +1,7 @@
 """Rigging and animation tools: joints, skinning, IK, controls, keys, baking, layers."""
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, List, Union
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field
@@ -111,6 +111,36 @@ class ResetBindPoseInput(BaseModel):
     mesh: str | None = Field(default=None, description="Skinned mesh whose influences get a fresh bind pose")
     joints: List[str] | None = Field(default=None, description="Or explicit joints")
     go_to_bind_pose: bool = Field(default=False, description="True: move joints back to the stored bind pose instead of re-saving it")
+
+
+class GetSkinClusterInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mesh: str = Field(..., description="Mesh transform or shape, e.g. 'body_geo'")
+
+
+class GetVertexWeightsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mesh: str = Field(..., description="Skinned mesh transform or shape")
+    vertices: Union[List[int], str] = Field(default="all", description="Vertex indices, e.g. [0, 1, 2], or 'all' (capped at 2000 vertices)", examples=[[0, 1, 2], "all"])
+    skin_cluster: str | None = Field(default=None, description="skinCluster node; found automatically when omitted")
+    min_weight: float = Field(default=0.0001, ge=0.0, le=1.0, description="Influences below this weight are left out")
+
+
+class SetVertexWeightsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mesh: str = Field(..., description="Skinned mesh transform or shape")
+    vertices: Union[List[int], str] = Field(..., description="Vertex indices to edit, e.g. [12, 13], or 'all'", examples=[[12, 13]])
+    weights: Dict[str, float] = Field(..., min_length=1, description="{joint: weight} pairs, weights 0 to 1, e.g. {'L_elbow': 0.7, 'L_wrist': 0.3}", examples=[{"L_elbow": 0.7, "L_wrist": 0.3}])
+    skin_cluster: str | None = Field(default=None, description="skinCluster node; found automatically when omitted")
+    normalize: bool = Field(default=True, description="Keep each vertex total at 1.0 by adjusting the other influences")
+
+
+class PruneWeightsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mesh: str = Field(..., description="Skinned mesh transform or shape")
+    below: float = Field(default=0.01, ge=0.0, lt=1.0, description="Weights under this value are set to zero")
+    normalize: bool = Field(default=True, description="Renormalise every vertex to 1.0 after pruning")
+    skin_cluster: str | None = Field(default=None, description="skinCluster node; found automatically when omitted")
 
 
 # anim inputs ---------------------------------------------------------------
@@ -312,6 +342,35 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         bound in a different pose' errors), or with go_to_bind_pose restore the
         joints to the stored pose."""
         return await ctx.run("rig.reset_bind_pose", params.model_dump())
+
+    @mcp.tool(name="maya_get_skin_cluster", annotations={"title": "Find skin cluster", **READ})
+    async def maya_get_skin_cluster(params: GetSkinClusterInput) -> str:
+        """Find the skinCluster deforming a mesh (findRelatedSkinCluster, then
+        history) and list its influences and vertex count. skin_cluster is
+        null when the mesh is not bound."""
+        return await ctx.run("rig.get_skin_cluster", params.model_dump())
+
+    @mcp.tool(name="maya_get_vertex_weights", annotations={"title": "Read vertex weights", **READ})
+    async def maya_get_vertex_weights(params: GetVertexWeightsInput) -> str:
+        """Read skin weights per vertex as {index: {joint: weight}}. Pass a list of
+        indices or 'all'; reads stop at 2000 vertices and set truncated=true, so
+        ask for ranges on dense meshes. Use it to inspect weighting before and
+        after maya_set_vertex_weights."""
+        return await ctx.run("rig.get_vertex_weights", params.model_dump(), timeout=300.0)
+
+    @mcp.tool(name="maya_set_vertex_weights", annotations={"title": "Set vertex weights", **WRITE})
+    async def maya_set_vertex_weights(params: SetVertexWeightsInput) -> str:
+        """Set several joint weights on a set of vertices in one skinPercent call.
+        Joints must already be influences of the skinCluster. With normalize the
+        remaining influences are rebalanced so each vertex totals 1.0. Returns
+        the resulting weights of the first vertex for a quick check."""
+        return await ctx.run("rig.set_vertex_weights", params.model_dump(), timeout=300.0)
+
+    @mcp.tool(name="maya_prune_weights", annotations={"title": "Prune skin weights", **WRITE})
+    async def maya_prune_weights(params: PruneWeightsInput) -> str:
+        """Zero tiny influence weights on a whole mesh and renormalise. Cleans up
+        noisy binds before export to a game engine or Unreal."""
+        return await ctx.run("rig.prune_weights", params.model_dump(), timeout=300.0)
 
     # anim --------------------------------------------------------------
     @mcp.tool(name="maya_set_keyframe", annotations={"title": "Set keyframe", **WRITE})

@@ -42,6 +42,7 @@ TOOL_MODULES = [
     "craft_critique",
     "craft_photo",
     "craft_plan",
+    "extensions",
 ]
 
 log = logging.getLogger("automaya")

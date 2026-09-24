@@ -397,6 +397,167 @@ def reset_bind_pose(mesh: str | None = None, joints: List[str] | None = None, go
     return {"action": "reset", "bind_pose": new_pose, "removed": list(set(old_poses)), "influences": _util.long_names(influences), "skin_cluster": cluster}
 
 
+# skin weights -------------------------------------------------------------------
+MAX_WEIGHT_VERTICES = 2000
+
+
+def _find_skin_cluster(mesh: str) -> str | None:
+    """findRelatedSkinCluster first (handles shapes, transforms and intermediate
+    objects the way the UI does), listHistory as the fallback."""
+    cluster = None
+    if mel is not None:
+        try:
+            cluster = mel.eval('findRelatedSkinCluster("%s")' % mesh)
+        except Exception:
+            cluster = None
+    if not cluster:
+        cluster = _skin_cluster_of(mesh)
+    return cluster or None
+
+
+def _resolve_skin(mesh: str, skin_cluster: str | None) -> str:
+    _util.require_nodes([mesh])
+    if skin_cluster:
+        _util.require_nodes([skin_cluster])
+        return skin_cluster
+    cluster = _find_skin_cluster(mesh)
+    if not cluster:
+        raise BridgeError("%s has no skinCluster; bind it first with rig.bind_skin" % mesh)
+    return cluster
+
+
+def _vertex_count(mesh: str) -> int:
+    try:
+        return int(cmds.polyEvaluate(mesh, vertex=True) or 0)
+    except Exception:
+        return 0
+
+
+def _vertex_indices(mesh: str, vertices: Any, cap: int | None = None) -> tuple:
+    """Turn 'all' or a list of ints into indices. Returns (indices, truncated)."""
+    if isinstance(vertices, str):
+        if vertices.lower() != "all":
+            raise BridgeError("vertices must be a list of ints or 'all'")
+        total = _vertex_count(mesh)
+        indices = list(range(total))
+    else:
+        try:
+            indices = [int(v) for v in (vertices or [])]
+        except (TypeError, ValueError):
+            raise BridgeError("vertices must be a list of ints or 'all', got %r" % (vertices,)) from None
+    if not indices:
+        raise BridgeError("no vertices given (pass indices like [0, 1, 2] or 'all')")
+    if any(i < 0 for i in indices):
+        raise BridgeError("vertex indices must be 0 or greater")
+    truncated = False
+    if cap is not None and len(indices) > cap:
+        indices = indices[:cap]
+        truncated = True
+    return indices, truncated
+
+
+def _influence_map(cluster: str) -> Dict[str, str]:
+    """short name -> influence name as the skinCluster reports it."""
+    influences = cmds.skinCluster(cluster, query=True, influence=True) or []
+    out: Dict[str, str] = {}
+    for inf in influences:
+        out[inf] = inf
+        out.setdefault(inf.split("|")[-1], inf)
+    return out
+
+
+@command("rig.get_skin_cluster")
+def get_skin_cluster(mesh: str) -> Dict[str, Any]:
+    """Find the skinCluster on a mesh (findRelatedSkinCluster, then history) and list its influences."""
+    _util.require_maya()
+    _util.require_nodes([mesh])
+    cluster = _find_skin_cluster(mesh)
+    if not cluster:
+        return {"mesh": _util.long_name(mesh), "skin_cluster": None, "influences": [], "vertex_count": _vertex_count(mesh)}
+    influences = cmds.skinCluster(cluster, query=True, influence=True) or []
+    return {
+        "mesh": _util.long_name(mesh),
+        "skin_cluster": cluster,
+        "influences": list(influences),
+        "influence_count": len(influences),
+        "vertex_count": _vertex_count(mesh),
+    }
+
+
+@command("rig.get_vertex_weights")
+def get_vertex_weights(mesh: str, vertices: Any = "all", skin_cluster: str | None = None, min_weight: float = 0.0001) -> Dict[str, Any]:
+    """Skin weights per vertex as {index: {joint: weight}}. Capped at 2000 vertices (truncated flag)."""
+    _util.require_maya()
+    cluster = _resolve_skin(mesh, skin_cluster)
+    indices, truncated = _vertex_indices(mesh, vertices, cap=MAX_WEIGHT_VERTICES)
+    influences = cmds.skinCluster(cluster, query=True, influence=True) or []
+    threshold = float(min_weight)
+    weights: Dict[str, Dict[str, float]] = {}
+    for idx in indices:
+        comp = "%s.vtx[%d]" % (mesh, idx)
+        values = cmds.skinPercent(cluster, comp, query=True, value=True) or []
+        per = {}
+        for joint, w in zip(influences, values):
+            w = float(w)
+            if w >= threshold:
+                per[joint] = round(w, 6)
+        weights[str(idx)] = per
+    return {
+        "mesh": _util.long_name(mesh),
+        "skin_cluster": cluster,
+        "influences": list(influences),
+        "weights": weights,
+        "count": len(weights),
+        "truncated": truncated,
+        "max_vertices": MAX_WEIGHT_VERTICES,
+    }
+
+
+@command("rig.set_vertex_weights", mutates=True)
+def set_vertex_weights(mesh: str, vertices: Any, weights: Dict[str, float], skin_cluster: str | None = None, normalize: bool = True) -> Dict[str, Any]:
+    """Set joint weights on vertices in one skinPercent call: weights is {joint: value}."""
+    _util.require_maya()
+    if not isinstance(weights, dict) or not weights:
+        raise BridgeError("weights must be a non empty dict of {joint: weight}")
+    cluster = _resolve_skin(mesh, skin_cluster)
+    indices, _ = _vertex_indices(mesh, vertices)
+    known = _influence_map(cluster)
+    pairs = []
+    for joint, value in weights.items():
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            raise BridgeError("weight for %s must be a number, got %r" % (joint, value)) from None
+        if not 0.0 <= value <= 1.0:
+            raise BridgeError("weight for %s must be between 0 and 1, got %s" % (joint, value))
+        target = known.get(joint) or known.get(joint.split("|")[-1])
+        if target is None:
+            raise BridgeError("%s is not an influence of %s. Influences: %s. Add it with skinCluster -addInfluence first." % (joint, cluster, ", ".join(sorted(set(known.values())))))
+        pairs.append((target, value))
+    comps = ["%s.vtx[%d]" % (mesh, i) for i in indices]
+    cmds.skinPercent(cluster, comps, transformValue=pairs, normalize=bool(normalize))
+    first = "%s.vtx[%d]" % (mesh, indices[0])
+    influences = cmds.skinCluster(cluster, query=True, influence=True) or []
+    values = cmds.skinPercent(cluster, first, query=True, value=True) or []
+    result = {j: round(float(w), 6) for j, w in zip(influences, values) if float(w) > 0.0}
+    return {"mesh": _util.long_name(mesh), "skin_cluster": cluster, "vertices": comps, "set": dict(pairs), "normalized": bool(normalize), "first_vertex_result": result}
+
+
+@command("rig.prune_weights", mutates=True)
+def prune_weights(mesh: str, below: float = 0.01, normalize: bool = True, skin_cluster: str | None = None) -> Dict[str, Any]:
+    """Zero every influence weight under ``below`` on the whole mesh, then renormalise."""
+    _util.require_maya()
+    below = float(below)
+    if not 0.0 <= below < 1.0:
+        raise BridgeError("below must be between 0 and 1 (0.01 is a sensible default)")
+    cluster = _resolve_skin(mesh, skin_cluster)
+    comps = "%s.vtx[*]" % mesh
+    cmds.skinPercent(cluster, comps, pruneWeights=below)
+    if normalize:
+        cmds.skinPercent(cluster, comps, normalize=True)
+    return {"mesh": _util.long_name(mesh), "skin_cluster": cluster, "pruned_below": below, "normalized": bool(normalize), "vertex_count": _vertex_count(mesh)}
+
+
 # anim.* ------------------------------------------------------------------------
 @command("anim.set_keyframe", mutates=True)
 def set_keyframe(nodes: List[str] | None = None, attrs: List[str] | None = None, time: float | None = None, value: float | None = None,

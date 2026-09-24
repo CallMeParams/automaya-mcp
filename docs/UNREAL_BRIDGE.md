@@ -237,3 +237,7 @@ built per Maya version, has no scripting hooks and knows nothing about
 AutoMaya's agent. The two can run side by side: use Autodesk's for skeletal
 animation, AutoMaya's for scene layout, cameras, lights, markers and USD
 reloads driven by the agent.
+
+## Reference implementation: Epic's MobuLiveLink
+
+Epic maintains an open source Live Link plugin for MotionBuilder (github.com/EpicGames/MobuLiveLink, 175 stars). It is the cleanest public example of the C++ side we would write for Maya: a DCC plugin that acts as an `ILiveLinkProvider` (via `LiveLinkMessageBusFramework`), publishes subjects (cameras, lights, skeletons, props) over the UDP message bus, and shows up in Unreal's Live Link window as a source without any custom receiver code. Autodesk's own Maya Live Link plugin (github.com/Autodesk/LiveLink) is the Maya specific equivalent built with the Maya devkit. For AutoMaya the plan is: keep the NDJSON stream as the agent facing feed, and add a thin C++ provider that maps the same events onto `FLiveLinkTransformFrameData` / `FLiveLinkCameraFrameData` / `FLiveLinkLightFrameData` and skeleton static data, so the Unreal side needs nothing but the stock Live Link plugin. MobuLiveLink is the template for the provider and subject plumbing; the Autodesk plugin is the template for pulling data out of Maya.

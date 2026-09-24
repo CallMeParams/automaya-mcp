@@ -25,5 +25,5 @@ Knowledge base for the AutoMaya MCP project: an MCP server plus in-Maya bridge t
 ## Quick facts
 - Repo: `automaya-mcp`, package `automaya_mcp` (server) and `automaya_bridge` (plugin)
 - Ports: 9877 commands, 9878 event broadcast, loopback only
-- 244 tools in 19 modules, 6 prompts, 468 tests
+- 252 tools in 20 modules (plus dynamic maya_ext_* tools), 6 prompts, 497 tests
 - Owner: Adam Waters, Senior Previs Artist, Sydney

@@ -46,3 +46,7 @@ src = ["src", "maya_plugin", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 ignore = ["E501", "B008", "B904", "B905", "UP006", "UP007", "UP035", "UP031"]
+
+[tool.ruff.lint.per-file-ignores]
+# Extension scripts keep typing.Optional so they stay drop-in compatible with older Maya Pythons.
+"maya_plugin/extensions/*.py" = ["UP045"]

@@ -28,6 +28,7 @@ MODULES = [
     "light",
     "lookdev",
     "photo",
+    "extensions",
 ]
 
 _loaded = False

@@ -7,11 +7,17 @@
 ``app``        a FastMCP app wired to that bridge
 ``call_tool``  helper that invokes an MCP tool by name and returns its text
 """
+# ruff: noqa: E402
 from __future__ import annotations
 
 import json
+import os
 import socket
+import tempfile
 from typing import Any, Dict
+
+# Keep the extension loader's user drop folder out of the real ~/maya during tests.
+os.environ.setdefault("MAYA_APP_DIR", tempfile.mkdtemp(prefix="automaya_test_"))
 
 import maya  # noqa: F401, installs the stub into sys.modules
 import pytest

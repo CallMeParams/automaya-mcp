@@ -21,6 +21,9 @@ async def build() -> str:
         total += len(tools)
         lines.append("## %s (%d)" % (module, len(tools)))
         lines.append("")
+        if module == "extensions":
+            lines.append("Plus one `maya_ext_<module>_<func>` tool per drop-in script function when Maya is running at server start (see README, Extensions).")
+            lines.append("")
         for t in sorted(tools, key=lambda t: t.name):
             desc = (t.description or "").strip().split("\n")[0]
             props = (t.inputSchema or {}).get("properties", {})

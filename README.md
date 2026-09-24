@@ -57,6 +57,7 @@ Ask Claude: "check the Maya status, then build a 35mm shot camera on a crane rig
 | `AUTOMAYA_SAFE_MODE=1` | block shell, network and filesystem access inside `maya_execute_python` |
 | `AUTOMAYA_MODULES` | comma list to load only some tool modules (smaller context), e.g. `core,scene,modeling,previs,intelligence` |
 | `AUTOMAYA_DOWNLOAD_DIR` | where generated and downloaded assets land |
+| `AUTOMAYA_EXT_PATH` | extra folders of drop-in extension scripts, `os.pathsep` separated (set it in Maya's environment, the plugin reads it) |
 | `TRIPO_API_KEY`, `MESHY_API_KEY`, `RODIN_API_KEY` or `FAL_KEY`, `HUNYUAN_SECRET_ID` + `HUNYUAN_SECRET_KEY` or `HUNYUAN_LOCAL_URL`, `HIGGSFIELD_API_KEY` + `HIGGSFIELD_API_SECRET` (+ `HIGGSFIELD_3D_ENDPOINT`), `REPLICATE_API_TOKEN` (+ `REPLICATE_3D_MODEL`) | 3D generation providers |
 | `SKETCHFAB_API_TOKEN`, `POLYPIZZA_API_KEY` | asset libraries (Poly Haven needs no key) |
 
@@ -64,7 +65,31 @@ Keys can also be pasted into the Settings dialog (gear button in the console hea
 
 ## Tool families
 
-core, scene, modeling, materials, rigging_animation, previs, sim_vfx, arnold, assets, generation, intelligence, livelink, introspect, plus the Craft layer: craft_procgen (parametric buildings, streets, rooms, furniture, terrain, scatter at real scale), craft_light (solar position, HDRI, three point and studio rigs, practicals in lumens and Kelvin, exposure in EV), craft_lookdev (measured PBR library, wear, variation, ACES, render presets), craft_critique (render analysis and reference comparison with concrete fixes), craft_photo (camera match, photo to block, depth relief), craft_plan (scene plan, quality gate). See [docs/CRAFT.md](docs/CRAFT.md). The full list with parameters is in [docs/TOOLS.md](docs/TOOLS.md). Prompts shipped with the server: `asset_creation_strategy`, `previs_shot_workflow`, `unreal_realtime_viewport`, `astra_loop`, `lighting_science`, `photo_to_scene`.
+core, scene, modeling, materials, rigging_animation, previs, sim_vfx, arnold, assets, generation, intelligence, livelink, introspect, extensions (drop-in scripts, see below), plus the Craft layer: craft_procgen (parametric buildings, streets, rooms, furniture, terrain, scatter at real scale), craft_light (solar position, HDRI, three point and studio rigs, practicals in lumens and Kelvin, exposure in EV), craft_lookdev (measured PBR library, wear, variation, ACES, render presets), craft_critique (render analysis and reference comparison with concrete fixes), craft_photo (camera match, photo to block, depth relief), craft_plan (scene plan, quality gate). See [docs/CRAFT.md](docs/CRAFT.md). The full list with parameters is in [docs/TOOLS.md](docs/TOOLS.md). Prompts shipped with the server: `asset_creation_strategy`, `previs_shot_workflow`, `unreal_realtime_viewport`, `astra_loop`, `lighting_science`, `photo_to_scene`.
+
+## Extensions: drop a script, get tools
+
+Any `.py` file in `<MAYA_APP_DIR>/automaya/tools/` (created on first start), in `maya_plugin/extensions/` or in a folder listed in `AUTOMAYA_EXT_PATH` is imported by the plugin. Every public function becomes a bridge command `ext.<module>.<func>` and, when Maya is running at server start, an MCP tool `maya_ext_<module>_<func>` whose description is the docstring and whose input schema comes from the type hints. The format is the same one PatrickPalmer/MayaMCP uses, so those scripts work as they are:
+
+```python
+from typing import List, Optional
+
+def extrude_faces(mesh: str, faces: Optional[List[int]] = None, thickness: float = 1.0) -> dict:
+    """Extrude polygon faces on a mesh.
+
+    Args:
+        mesh: Transform or shape name.
+        faces: Face indices, None for all.
+        thickness: Distance along the normal.
+    """
+    from maya import cmds   # Maya imports stay inside the function
+    if not cmds.objExists(mesh):
+        return "Error: mesh %r does not exist" % mesh   # "Error:" strings become proper tool errors
+    ...
+    return {"mesh": mesh, "faces": len(faces or [])}
+```
+
+Rules: JSON types in and out, Maya imports inside the function, names starting with `_` are skipped. Functions named `get_*`, `find_*`, `list_*`, `query_*`, `read_*`, `is_*` or `has_*` are read only; everything else runs in an undo chunk that rolls back on failure. `maya_ext_list` shows what loaded (and which files failed to import), `maya_ext_source` shows the code, `maya_ext_call` runs any command by name even if the typed tool does not exist yet, and `maya_ext_reload` rescans after you edit a script. Two example scripts ship in `maya_plugin/extensions/` (`modeling_tools.py`, `rigging_tools.py`).
 
 ## Real time viewport in Unreal
 
@@ -77,7 +102,7 @@ The schema, coordinate conversion, and the outline for turning the subscriber in
 ## Development
 
 ```bash
-python3 -m pytest -q             # 468 tests: protocol, registry, every domain over a real socket against a maya stub
+python3 -m pytest -q             # 497 tests: protocol, registry, every domain over a real socket against a maya stub
 ruff check src maya_plugin tests unreal
 mayapy tests/maya_integration/run_in_mayapy.py   # integration pattern inside a real Maya
 python3 scripts/gen_tool_catalogue.py            # refresh docs/TOOLS.md
