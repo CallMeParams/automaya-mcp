@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check . || echo "::warning::ruff format differences (not enforced yet)"
+
+  test:
+    name: test (py${{ matrix.python }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.13"]   # 3.10 = mayapy (Maya 2024), 3.13 = latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Fresh install (no cache, so dependency drift shows up)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir -e ".[dev]"
+      - name: Import smoke test
+        run: python -c "import automaya_mcp, mcp.server.fastmcp; print('ok')"
+      - run: pytest -q
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install build
+      - run: python -m build
+      - name: Check wheel and sdist contents
+        shell: bash
+        run: |
+          set -e
+          whl=$(ls dist/*.whl); sdist=$(ls dist/*.tar.gz)
+          python -m zipfile -l "$whl" | grep -q "automaya_mcp/unreal/automaya_subscriber.py"
+          python -m zipfile -l "$whl" | grep -q "automaya_mcp/maya_plugin/"
+          tar tzf "$sdist" | grep -q "/unreal/automaya_subscriber.py"
+          echo "wheel and sdist include unreal/ and maya_plugin/"
+      - name: Install built wheel in a clean venv
+        run: |
+          python -m venv /tmp/whl && /tmp/whl/bin/pip install dist/*.whl
+          /tmp/whl/bin/python -c "import automaya_mcp; print('wheel import ok')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
